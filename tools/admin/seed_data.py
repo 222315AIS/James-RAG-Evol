@@ -19,7 +19,10 @@ from datetime import datetime
 try:
     from config import WIKI_DIR
 except ImportError:
-    WIKI_DIR = r"C:\Project\james prototype\wiki"
+    import os as _os
+    # 현재 파일 위치 기준 (tools/admin/) → 두 단계 위가 프로젝트 루트
+    _root = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    WIKI_DIR = _os.path.join(_root, "wiki")
 
 
 SEED_ENTITIES = [

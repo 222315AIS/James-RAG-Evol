@@ -12,13 +12,17 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 import uuid
 import os
-from config import CHROMA_DIR, CHROMA_COLLECTION
+from config import CHROMA_DIR, CHROMA_COLLECTION, BASE_DIR
 
 # ✅ 싱글톤 모델 캐싱 (초기화 10초 → 최초 1회만)
 _MODEL_CACHE: dict = {}
 
 # 로컬 모델 경로 (없으면 HuggingFace에서 자동 다운로드)
-LOCAL_MODEL_PATH = r"C:\Project\james prototype\models\miniLM"
+# BASE_DIR 기준 자동 감지 — 폴더 이동/이름 변경에 안전
+LOCAL_MODEL_PATH = os.environ.get(
+    "JAMES_MODEL_PATH",
+    os.path.join(BASE_DIR, "models", "miniLM")
+)
 FALLBACK_MODEL   = "paraphrase-multilingual-MiniLM-L12-v2"
 
 

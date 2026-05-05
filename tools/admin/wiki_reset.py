@@ -31,7 +31,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
 try:
     from config import BASE_DIR, WIKI_DIR, CHROMA_DIR
 except ImportError:
-    BASE_DIR   = r"C:\Project\james prototype"
+    # tools/admin/ 위치 → 두 단계 위가 프로젝트 루트
+    BASE_DIR   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     WIKI_DIR   = os.path.join(BASE_DIR, "wiki")
     CHROMA_DIR = os.path.join(BASE_DIR, "chroma_db")
 

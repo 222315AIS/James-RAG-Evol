@@ -159,7 +159,9 @@ if __name__ == "__main__":
     try:
         from config import WIKI_DIR
     except ImportError:
-        WIKI_DIR = r"C:\Project\james prototype\wiki"
+        # config import 실패 시 — 현재 스크립트 위치 기준
+        import os as _os
+        WIKI_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "wiki")
 
     mode = "DRY-RUN" if dry_run else "실제 패치"
     print(f"\n[PATCH] Entity 필드 일괄 패치 ({mode}, target={target_source})")
