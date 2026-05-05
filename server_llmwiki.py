@@ -423,9 +423,10 @@ async def upload(
             rag_engine.wiki_generator.process_document_for_entities(
                 file.filename, raw_content, [],
                 user_role="admin",
+                metadata=meta,
             )
         except TypeError:
-            # user_role 인자 없는 구버전
+            # 구버전 시그니처 fallback (metadata/user_role 미지원)
             try:
                 rag_engine.wiki_generator.process_document_for_entities(
                     file.filename, raw_content, []

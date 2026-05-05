@@ -17,6 +17,11 @@ from core.vector_store import VectorStore
 from utils.metadata import MetadataGenerator
 
 
+_SAFE_ENTITY_NAME_RE = re.compile(r'^[A-Za-z0-9가-힣\s\-_,()&·\.]{2,80}$')
+_ALLOWED_EXTRACT_TYPES = frozenset(("person", "org", "concept"))
+_ONTOLOGY_LABELS_KO = "공부, 연구, 가르침, 소속, 근무, 분류, 구성, 관련, 생산, 산업, 분야, 설립됨"
+
+
 class WikiGenerator:
 
     def __init__(self, source_type: str = "prod"):
@@ -460,3 +465,196 @@ class WikiGenerator:
 
         stats["total"] = total
         return stats
+
+    # =========================
+    # DOCUMENT → ENTITY EXTRACTION (LLM-based, P7)
+    # =========================
+
+    def process_document_for_entities(
+        self,
+        filename:  str,
+        content:   str,
+        chunk_ids: List[str],
+        user_role: str = "admin",
+        metadata:  Optional[Dict] = None,
+    ) -> List[str]:
+        """
+        문서 본문에서 LLM으로 인물/조직/개념 entity와 relation을 추출하여
+        각 entity별 .md를 생성하고, 추가로 원본을 document entity로도 보존한다.
+
+        Returns:
+            생성된 entity_id 리스트 (실패 시 빈 리스트 또는 document만)
+        """
+        metadata  = metadata or {}
+        extracted = self._llm_extract_document_entities(filename, content, metadata)
+
+        created_ids:   List[str]      = []
+        name_to_id:    Dict[str, str] = {}
+        name_to_type:  Dict[str, str] = {}
+
+        for ent in extracted.get("entities", []):
+            if not self._is_safe_extracted_entity(ent):
+                continue
+            name  = ent["name"].strip()
+            etype = ent["type"]
+
+            existing_id = self._find_existing_entity_id(name, etype)
+            if existing_id:
+                print(f"[ENTITY-EXTRACT] '{name}' ({etype}) already exists -> skip")
+                name_to_id[name]   = existing_id
+                name_to_type[name] = etype
+                continue
+
+            ent_relations = self._build_entity_relations(
+                name, extracted.get("relations", [])
+            )
+            payload = {
+                "name":        name,
+                "type":        etype,
+                "attributes":  {
+                    "summary":          (ent.get("description") or "")[:300],
+                    "source_document":  filename,
+                },
+                "relations":   ent_relations,
+                "sensitivity": "internal",
+                "source_type": self.source_type,
+            }
+            try:
+                self.create_entity_file(payload, filename, chunk_ids, user_role=user_role)
+                eid = self._generate_entity_id(name, etype)
+                name_to_id[name]   = eid
+                name_to_type[name] = etype
+                created_ids.append(eid)
+                print(f"[ENTITY-EXTRACT] OK {etype}/{name}")
+            except ValueError as e:
+                print(f"[ENTITY-EXTRACT] Trust reject: {name} ({e})")
+            except Exception as e:
+                print(f"[ENTITY-EXTRACT] FAIL {name}: {e}")
+
+        # document entity (원본 보존 + 모든 추출 entity와 RELATED_TO)
+        doc_name = os.path.splitext(filename)[0]
+        doc_relations = [
+            {
+                "target":      n,
+                "target_type": name_to_type.get(n, "concept"),
+                "label":       "관련",
+                "confidence":  0.7,
+            }
+            for n in name_to_id
+        ]
+        kw = metadata.get("keywords", [])
+        kw_str = ", ".join(str(k) for k in kw) if isinstance(kw, list) else str(kw)
+        doc_payload = {
+            "name":        doc_name,
+            "type":        "document",
+            "attributes":  {
+                "summary":   (metadata.get("summary") or "")[:500],
+                "category":  metadata.get("category", "기타"),
+                "keywords":  kw_str,
+            },
+            "relations":   doc_relations,
+            "sensitivity": metadata.get("sensitivity", "internal"),
+            "source_type": self.source_type,
+        }
+        try:
+            self.create_entity_file(doc_payload, filename, chunk_ids, user_role=user_role)
+            created_ids.append(self._generate_entity_id(doc_name, "document"))
+        except Exception as e:
+            print(f"[ENTITY-EXTRACT] document entity FAIL: {e}")
+
+        try:
+            self.refresh_entity_map()
+        except Exception:
+            self._build_entity_id_index()
+
+        print(f"[ENTITY-EXTRACT] {filename} -> {len(created_ids)} entities created "
+              f"(extracted {len(name_to_id)} + 1 document)")
+        return created_ids
+
+    def _llm_extract_document_entities(
+        self,
+        filename: str,
+        content:  str,
+        metadata: Dict,
+    ) -> Dict:
+        """LLM 호출 + JSON 파싱. 실패 시 {'entities':[], 'relations':[]} 반환."""
+        # generate_metadata 와 같은 형식으로 통일 (그쪽이 안정적으로 동작 검증됨)
+        text = (content or "")[:2000]
+
+        prompt = (
+            "You must output ONLY a JSON object. "
+            "No explanation, no thinking, no markdown. Just raw JSON.\n\n"
+            "Output format:\n"
+            '{"entities": [{"name": "X", "type": "person|org|concept", "description": "한줄설명"}], '
+            '"relations": [{"source": "X", "target": "Y", "label": "관련", "confidence": 0.7}]}\n\n'
+            f"Allowed relation labels (Korean only): {_ONTOLOGY_LABELS_KO}\n"
+            "Max 6 entities and 6 relations. "
+            "Extract only entities EXPLICITLY named in the document below. No inference.\n\n"
+            "Document:\n"
+            + text
+            + "\n\nJSON:"
+        )
+        try:
+            response = self.gemma_client.call_gemma(prompt, use_cache=False)
+        except Exception as e:
+            print(f"[ENTITY-EXTRACT] LLM call FAIL: {e}")
+            return {"entities": [], "relations": []}
+
+        if (not response or not response.strip()
+                or "응답 없음" in response or "Gemma 오류" in response):
+            print(f"[ENTITY-EXTRACT] LLM empty/error response: {response[:80]}")
+            return {"entities": [], "relations": []}
+
+        m = re.search(r'\{.*\}', response, re.DOTALL)
+        if not m:
+            print(f"[ENTITY-EXTRACT] no JSON in response (head): {response[:200]}")
+            return {"entities": [], "relations": []}
+        raw_json = m.group(0)
+        try:
+            data = json.loads(raw_json)
+        except json.JSONDecodeError as e:
+            print(f"[ENTITY-EXTRACT] JSON parse FAIL: {e} | head: {raw_json[:200]}")
+            return {"entities": [], "relations": []}
+
+        if not isinstance(data, dict):
+            return {"entities": [], "relations": []}
+        ents = data.get("entities", []) or []
+        rels = data.get("relations", []) or []
+        if not isinstance(ents, list): ents = []
+        if not isinstance(rels, list): rels = []
+        return {"entities": ents, "relations": rels}
+
+    @staticmethod
+    def _is_safe_extracted_entity(ent: Any) -> bool:
+        """Schema + 보안 검증. injection-safe + 길이/타입 화이트리스트."""
+        if not isinstance(ent, dict): return False
+        name = ent.get("name", "")
+        if not isinstance(name, str): return False
+        name = name.strip()
+        if len(name) < 2 or len(name) > 80: return False
+        if not _SAFE_ENTITY_NAME_RE.match(name): return False
+        if ent.get("type") not in _ALLOWED_EXTRACT_TYPES: return False
+        return True
+
+    def _build_entity_relations(
+        self,
+        source_name:   str,
+        raw_relations: List,
+    ) -> List[Dict]:
+        """source 이름이 일치하는 relation만 추출하여 표준 형식으로 반환."""
+        out: List[Dict] = []
+        for r in raw_relations or []:
+            if not isinstance(r, dict): continue
+            src = (r.get("source") or "").strip()
+            if src != source_name: continue
+            tgt = (r.get("target") or "").strip()
+            if not tgt or len(tgt) > 80 or not _SAFE_ENTITY_NAME_RE.match(tgt):
+                continue
+            label = (r.get("label") or "관련").strip()[:20]
+            try:
+                conf = float(r.get("confidence", 0.7))
+            except (TypeError, ValueError):
+                conf = 0.7
+            conf = max(0.0, min(1.0, conf))
+            out.append({"target": tgt, "label": label, "confidence": conf})
+        return out
