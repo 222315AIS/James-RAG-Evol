@@ -51,6 +51,14 @@ workspace/
 uploads/
 backups/
 
+# 사용자 PDF에서 추출된 wiki entity (개인 데이터, repo에 푸시 X)
+# 폴더 구조는 유지 (wiki_generator/wiki_reset가 자동 재생성)
+wiki/entity/prod/concept/*.md
+wiki/entity/prod/org/*.md
+wiki/entity/prod/person/*.md
+wiki/entity/prod/document/*.md
+wiki/entity/prod/system_internal/*.md
+
 # ── ML 모델 / 임베딩 캐시 ──────────────────────────────────────
 models/
 *.bin
