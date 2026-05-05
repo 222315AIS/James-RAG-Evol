@@ -1,0 +1,78 @@
+# ═══════════════════════════════════════════════════════════════
+#  PROJECT JAMES — Python Dependencies
+#  v0.1.0-alpha
+# ═══════════════════════════════════════════════════════════════
+
+# ── Web Framework / Server ─────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+pydantic>=2.5.0
+
+# ── Authentication / Security ──────────────────────────────────
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-dotenv>=1.0.0
+
+# ── HTTP / Networking ──────────────────────────────────────────
+requests>=2.31.0
+
+# ── Vector DB / Embeddings / Search ────────────────────────────
+chromadb>=0.4.22
+sentence-transformers>=2.5.0
+rank-bm25>=0.2.2
+
+# ── Numerical / Data ───────────────────────────────────────────
+numpy>=1.24.0
+PyYAML>=6.0
+
+# ── Hardware Monitoring (auto-recommendation) ──────────────────
+psutil>=5.9.0
+# pynvml: optional, only for NVIDIA GPU detection
+pynvml>=11.5.0
+
+# ── Web Search (Tavily primary, DDG fallback) ──────────────────
+tavily-python>=0.3.0
+duckduckgo-search>=5.0.0
+
+# ── Document Parsing ───────────────────────────────────────────
+markdown2>=2.4.0
+PyPDF2>=3.0.0
+pdf2image>=1.17.0
+
+# ── OCR (Image text extraction) ────────────────────────────────
+pytesseract>=0.3.10
+easyocr>=1.7.0
+
+# ── Image Processing ───────────────────────────────────────────
+Pillow>=10.0.0
+opencv-python>=4.9.0
+
+# ── Video / Audio Processing ───────────────────────────────────
+ffmpeg-python>=0.2.0
+openai-whisper>=20231117
+
+# ═══════════════════════════════════════════════════════════════
+#  System Requirements (install separately, not via pip)
+# ═══════════════════════════════════════════════════════════════
+#
+#  • Ollama (LLM runtime)
+#      https://ollama.ai
+#      ollama pull gemma2:2b   # or any supported model
+#
+#  • Tesseract OCR (for pytesseract)
+#      Windows: https://github.com/UB-Mannheim/tesseract/wiki
+#      macOS:   brew install tesseract
+#      Linux:   apt install tesseract-ocr
+#
+#  • FFmpeg (for video/audio processing)
+#      Windows: https://ffmpeg.org/download.html
+#      macOS:   brew install ffmpeg
+#      Linux:   apt install ffmpeg
+#
+#  • Poppler (for pdf2image)
+#      Windows: https://github.com/oschwartz10612/poppler-windows
+#      macOS:   brew install poppler
+#      Linux:   apt install poppler-utils
+#
+# ═══════════════════════════════════════════════════════════════

@@ -1,0 +1,228 @@
+{
+  "timestamp": "2026-04-21T15:49:19.017683",
+  "mode": "dry-run",
+  "wiki_path": "C:\\Project\\james prototype\\wiki",
+  "total_files": 37,
+  "entity_files": 36,
+  "skipped_files": 1,
+  "total_issues": 0,
+  "total_changed": 0,
+  "results": [
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\it.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\경제학.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\과학.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\교육.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\데이터.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\데이터_분석.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\사회과학.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\인공지능.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\concept\\전자.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\org\\네이버.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\org\\삼성전자.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\org\\서울대학교.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\org\\연구소.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\org\\카이스트.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\person\\김철수.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\person\\데이터_분석가.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\person\\박민수.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\person\\이영희.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\it.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\경제학.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\과학.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\교육.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\데이터.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\데이터_분석.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\사회과학.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\인공지능.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\concept\\전자.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\org\\네이버.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\org\\삼성전자.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\org\\서울대학교.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\org\\연구소.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\org\\카이스트.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\person\\김철수.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\person\\데이터_분석가.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\person\\박민수.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    },
+    {
+      "path": "C:\\Project\\james prototype\\wiki\\entity\\prod\\person\\이영희.md",
+      "issues": [],
+      "fixed": [],
+      "changed": false
+    }
+  ]
+}

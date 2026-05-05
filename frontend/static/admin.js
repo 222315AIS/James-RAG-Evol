@@ -1,0 +1,1429 @@
+/* PROJECT JAMES — Admin JS */
+
+const API  = 'http://127.0.0.1:8000';
+let token  = sessionStorage.getItem('james_token') || '';
+let apiKey = localStorage.getItem('james_api_key') || '';
+
+/* ── [STEP 5-A] 언어 토글 ── */
+function toggleLang() {
+  const cur = (typeof getLang === 'function') ? getLang() : 'ko';
+  const next = cur === 'ko' ? 'en' : 'ko';
+  if (typeof setLang === 'function') setLang(next);
+  const indicator = document.getElementById('lang-current');
+  if (indicator) indicator.textContent = next.toUpperCase();
+}
+
+/* 페이지 로드 시 언어 표시기 동기화 */
+window.addEventListener('DOMContentLoaded', () => {
+  const indicator = document.getElementById('lang-current');
+  if (indicator && typeof getLang === 'function') {
+    indicator.textContent = getLang().toUpperCase();
+  }
+});
+
+/* ── 초기화 ── */
+window.addEventListener('DOMContentLoaded', async () => {
+  if (!apiKey) {
+    apiKey = prompt('JAMES API Key:') || '';
+    localStorage.setItem('james_api_key', apiKey);
+  }
+  const storedRole = sessionStorage.getItem('james_role') || '';
+  if (!token || storedRole !== 'admin') {
+    showAdminLoginModal();
+  } else {
+    loadDashboard();
+  }
+});
+
+/* ── Admin 로그인 모달 ── */
+function showAdminLoginModal() {
+  const modal = document.getElementById('admin-login-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    setTimeout(() => document.getElementById('admin-login-pw')?.focus(), 150);
+  }
+}
+
+async function doAdminLogin() {
+  const username = document.getElementById('admin-login-id')?.value.trim() || 'admin';
+  const password = document.getElementById('admin-login-pw')?.value || '';
+  const errEl    = document.getElementById('admin-login-error');
+  if (errEl) errEl.textContent = '';
+
+  if (!password) { if(errEl) errEl.textContent = t('auth.password_required'); return; }
+
+  try {
+    const r = await fetch(`${API}/login/`, {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({username, password, api_key: apiKey}),
+    });
+    const d = await r.json();
+
+    if (!r.ok) {
+      if(errEl) errEl.textContent = d.detail || `Login failed (${r.status})`;
+      return;
+    }
+
+    // access_token 또는 token 필드 모두 처리
+    const tok  = d.access_token || d.token || '';
+    const role = d.role || 'external';
+
+    if (!tok)            { if(errEl) errEl.textContent = t('auth.token_failed'); return; }
+    if (role !== 'admin'){ if(errEl) errEl.textContent = `Admin role required (role: ${role})`; return; }
+
+    token = tok;
+    sessionStorage.setItem('james_token', token);
+    sessionStorage.setItem('james_role',  role);
+
+    const modal = document.getElementById('admin-login-modal');
+    if (modal) modal.style.display = 'none';
+    loadDashboard();
+
+  } catch (e) {
+    if(errEl) errEl.textContent = `Server error: ${e.message}`;
+  }
+}
+
+
+/* ── 페이지 전환 ── */
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${id}`).classList.add('active');
+  el.classList.add('active');
+
+  const loaders = {
+    dashboard:      loadDashboard,
+    users:          loadUsers,
+    entities:       loadEntities,
+    memory:         loadMemory,
+    patches:        loadPatches,
+    audit:          loadAudit,
+    settings:       loadSettings,
+    proposals:      loadProposals,
+    'evo-reports':  loadEvoReports,
+    performance:    loadPerformance,
+    learning:       loadLearning,
+    character:      loadCharacter,
+    knowledge:      loadKnowledge,
+    hardware:       loadHardware,    // [P3-1]
+  };
+  loaders[id]?.();
+}
+
+/* ── API 요청 (Bearer 토큰 포함) ── */
+async function api(path, method='GET', body=null) {
+  const opts = {
+    method,
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const sep = path.includes('?') ? '&' : '?';
+  const r   = await fetch(`${API}${path}${sep}api_key=${apiKey}`, opts);
+  if (r.status === 401) {
+    token = '';
+    sessionStorage.removeItem('james_token');
+    alert(t('auth.expired_refresh'));
+    location.reload();
+    return {};
+  }
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+/* ── 대시보드 ── */
+async function loadDashboard() {
+  try {
+    const data = await api('/admin/dashboard');
+    const cards = document.getElementById('dash-cards');
+
+    // ── 통계 카드 ──────────────────────────────────────────
+    const avgColor  = (data.avg_elapsed > 20) ? 'var(--red,#f06292)' :
+                      (data.avg_elapsed > 10) ? 'var(--warn,#ffb74d)' : 'var(--accent)';
+    const blkColor  = data.blocked_count > 0 ? 'var(--warn,#ffb74d)' : 'var(--accent)';
+
+    cards.innerHTML = `
+      <div class="card">
+        <div class="card-label">${t('dash.entity_count')}</div>
+        <div class="card-value accent">${data.entity_count ?? '-'}</div>
+        <div class="card-sub">${t('dash.subtext_vector',{count:data.vector_count??'-'})}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">${t('dash.today_queries')}</div>
+        <div class="card-value accent">${data.today_queries ?? '-'}</div>
+        <div class="card-sub">${t('dash.subtext_today')}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">${t('dash.avg_elapsed')}</div>
+        <div class="card-value" style="color:${avgColor}">${data.avg_elapsed ?? '-'}s</div>
+        <div class="card-sub">${t('dash.subtext_avg')}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">${t('dash.blocked_count')}</div>
+        <div class="card-value" style="color:${blkColor}">${data.blocked_count ?? '-'}</div>
+        <div class="card-sub">${t('dash.subtext_blocked')}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">${t('dash.user_count')}</div>
+        <div class="card-value accent">${data.user_count ?? '-'}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">${t('dash.memory_count')}</div>
+        <div class="card-value accent">${data.memory_count ?? '-'}</div>
+        <div class="card-sub">${t('dash.subtext_memory')}</div>
+      </div>
+    `;
+
+    // ── 웹검색 상태 카드 제거 — 실제 검색은 작동하지만
+    //    표시만 불일치 발생 → 혼란 방지 위해 카드 미표시
+    //    (검색 작동 여부는 서버 로그에서 확인: [WEB] Tavily 검색 성공 등)
+
+
+    const chart = data.elapsed_chart || [];
+    if (chart.length > 0) {
+      const max_v = Math.max(...chart, 1);
+      const bars  = chart.map(v => {
+        const h   = Math.max(4, Math.round((v / max_v) * 60));
+        const col = v > 20 ? '#f06292' : v > 10 ? '#ffb74d' : '#7c6af7';
+        return `<div title="${v}s" style="width:${Math.floor(280/chart.length)-2}px;
+          height:${h}px;background:${col};border-radius:2px 2px 0 0;
+          flex-shrink:0"></div>`;
+      }).join('');
+
+      const chartEl = document.getElementById('dash-chart');
+      if (chartEl) {
+        chartEl.innerHTML = `
+          <div class="section-title" style="margin-top:16px">
+            ${t('dash.elapsed_chart',{count:chart.length})}
+            <span style="font-size:10px;color:var(--muted);margin-left:8px">
+              ${t('dash.chart_legend')}
+            </span>
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:2px;
+                      height:70px;padding:8px 20px;background:var(--bg);
+                      border-radius:6px;border:1px solid var(--border)">
+            ${bars}
+          </div>`;
+      }
+    }
+
+    // ── 최근 감사 로그 ────────────────────────────────────
+    const logBox = document.getElementById('dash-logs');
+    const logs = data.recent_queries || data.recent_logs || [];
+    if (!logs.length) {
+      if (logBox) logBox.innerHTML = `<div style='color:var(--muted)'>${t('dash.no_logs')}</div>`;
+    } else {
+      if (logBox) {
+        logBox.innerHTML = logs.map(l => {
+          const blocked = l.blocked ? '🚫' : '✅';
+          const elapsed = l.elapsed ? `${l.elapsed}s` : '';
+          const q = (l.q || l.query || '').slice(0, 60);
+          const ts = (l.ts || l.timestamp || '').slice(11, 19);
+          return `<div style="padding:4px 0;border-bottom:1px solid var(--border);
+                              font-size:12px;display:flex;gap:8px;align-items:center">
+            <span style="color:var(--muted);font-family:var(--font-mono);min-width:60px">${ts}</span>
+            <span>${blocked}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q || '-'}</span>
+            <span style="color:var(--muted);font-family:var(--font-mono)">${elapsed}</span>
+          </div>`;
+        }).join('');
+      }
+    }
+  } catch(e) {
+    const cards = document.getElementById('dash-cards');
+    if (cards) cards.innerHTML = `<div style='color:var(--muted)'>Load failed: ${e.message}</div>`;
+  }
+}
+
+/* ── 사용자 ── */
+async function loadUsers() {
+  try {
+    const data = await api('/admin/users');
+    const tbody = document.getElementById('users-body');
+    tbody.innerHTML = (data.users || []).map(u => `
+      <tr>
+        <td>${u.username}</td>
+        <td><span class="badge-role role-${u.role}">${u.role}</span></td>
+        <td class="mono">${u.created_at?.slice(0,10) || '-'}</td>
+        <td class="mono">${u.last_login?.slice(0,16) || '-'}</td>
+      </tr>
+    `).join('') || `<tr><td colspan='4' class='empty'>${t('users.empty')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('users-body').innerHTML = `<tr><td colspan="4" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+/* ── Entity ── */
+async function loadEntities() {
+  try {
+    const data = await api('/admin/entities');
+    const cards = document.getElementById('entity-cards');
+    const counts = data.type_counts || {};
+    cards.innerHTML = Object.entries(counts).map(([type, cnt]) => `
+      <div class="card">
+        <div class="card-label">${type.toUpperCase()}</div>
+        <div class="card-value accent">${cnt}</div>
+      </div>
+    `).join('') || '';
+
+    const tbody = document.getElementById('entities-body');
+    tbody.innerHTML = (data.entities || []).slice(0, 50).map(e => `
+      <tr>
+        <td>${e.name}</td>
+        <td class="mono">${e.entity_type}</td>
+        <td><span class="badge-status">${e.sensitivity || '-'}</span></td>
+        <td class="mono">${e.relation_count ?? 0}</td>
+      </tr>
+    `).join('') || `<tr><td colspan='4' class='empty'>${t('entity.no_entity')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('entities-body').innerHTML = `<tr><td colspan="4" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+/* ── Memory ── */
+async function loadMemory() {
+  try {
+    const data = await api('/admin/memory');
+    const stats = data.stats || {};
+    const cards = document.getElementById('memory-cards');
+    cards.innerHTML = `
+      <div class="card"><div class="card-label">PREFERENCES</div><div class="card-value accent">${stats.preferences ?? 0}</div></div>
+      <div class="card"><div class="card-label">PATTERNS</div><div class="card-value accent">${stats.patterns ?? 0}</div></div>
+      <div class="card"><div class="card-label">GOALS</div><div class="card-value accent">${stats.goals ?? 0}</div></div>
+      <div class="card"><div class="card-label">${t('mem.card_turns')}</div><div class="card-value success">${stats.conversations ?? 0}</div></div>
+      <div class="card"><div class="card-label">${t('mem.card_session_summary')}</div><div class="card-value success">${stats.session_summaries ?? 0}</div></div>
+    `;
+    // 선호도
+    const tbody = document.getElementById('memory-prefs');
+    tbody.innerHTML = (data.preferences || []).map(p => `
+      <tr>
+        <td class="mono">${p.key}</td>
+        <td>${p.value}</td>
+        <td class="mono">${p.updated_at?.slice(0,10) || '-'}</td>
+      </tr>
+    `).join('') || `<tr><td colspan='3' class='empty'>${t('mem.no_prefs')}</td></tr>`;
+
+    // 장기 기억
+    await loadLongTerm();
+    // 세션 목록
+    await loadSessions();
+
+  } catch (e) {
+    document.getElementById('memory-cards').innerHTML =
+      `<div class="empty">${e.message}</div>`;
+  }
+}
+
+async function loadLongTerm() {
+  try {
+    const data = await api('/history/long-term/?limit=10');
+    const tbody = document.getElementById('long-term-body');
+    tbody.innerHTML = (data.summaries || []).map(s => `
+      <tr>
+        <td class="mono">${s.saved_at?.slice(0,10) || '-'}</td>
+        <td>${s.topic || '-'}</td>
+        <td style="max-width:400px;font-size:12px">${s.summary?.slice(0,120) || '-'}</td>
+        <td>-</td>
+      </tr>
+    `).join('') || `<tr><td colspan='4' class='empty'>${t('mem.no_longterm')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('long-term-body').innerHTML =
+      `<tr><td colspan="4" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+async function loadSessions() {
+  try {
+    const data = await api('/history/sessions/');
+    const tbody = document.getElementById('sessions-body');
+    tbody.innerHTML = (data.sessions || []).map(s => `
+      <tr>
+        <td class="mono" style="font-size:10px">${s.session_id?.slice(0,20) || '-'}</td>
+        <td class="mono">${s.turn_count ?? 0} turns</td>
+        <td class="mono">${s.started?.slice(0,16) || '-'}</td>
+        <td class="mono">${s.last?.slice(0,16) || '-'}</td>
+        <td>
+          <button class="btn btn-approve" style="font-size:10px"
+            onclick="summarizeAndDelete('${s.session_id}')" data-i18n='mem.summarize_delete'>Summarize & Delete</button>
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan='5' class='empty'>${t('mem.no_sessions')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('sessions-body').innerHTML =
+      `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+async function summarizeAndDelete(sessionId) {
+  try {
+    // 1. 요약 저장
+    const r = await api(`/history/summarize/?session_id=${sessionId}`, 'POST');
+    if (r.success) {
+      toast(`✅ ${r.topic || sessionId.slice(0,12)} saved`, 'success');
+    }
+    // 2. 세션 삭제
+    await api(`/history/?session_id=${sessionId}`, 'DELETE');
+    // 3. 목록 갱신
+    await loadSessions();
+    await loadLongTerm();
+  } catch (e) {
+    alert(`Failed: ${e.message}`);
+  }
+}
+
+function toast(msg, type = 'success') {
+  const t = document.createElement('div');
+  t.style.cssText = `position:fixed;bottom:24px;right:24px;padding:10px 16px;
+    border-radius:8px;font-size:13px;z-index:100;
+    background:rgba(76,175,125,.15);border:1px solid var(--success);
+    color:var(--success);animation:fadeIn .25s ease`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+/* ── Patches ── */
+async function loadPatches() {
+  try {
+    const data = await api('/admin/patches');
+    const tbody = document.getElementById('patches-body');
+    tbody.innerHTML = (data.patches || []).map(p => `
+      <tr>
+        <td class="mono">${p.patch_id}</td>
+        <td class="mono">${p.target?.split('/').pop() || '-'}</td>
+        <td><span class="badge-status status-${p.status?.toLowerCase()}">${p.status}</span></td>
+        <td class="mono">${p.confidence != null ? (p.confidence*100).toFixed(0)+'%' : '-'}</td>
+        <td class="mono">${p.created_at?.slice(0,16) || '-'}</td>
+        <td>${p.status === 'PENDING_APPROVAL' ? `
+          <button class="btn btn-approve" onclick="patchAction('${p.patch_id}','approve')" data-i18n='prop.approve'>Approve</button>
+          <button class="btn btn-reject"  onclick="patchAction('${p.patch_id}','reject')" data-i18n='prop.reject'>Reject</button>
+        ` : '-'}</td>
+      </tr>
+    `).join('') || `<tr><td colspan='6' class='empty'>${t('patch.no_patches')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('patches-body').innerHTML = `<tr><td colspan="6" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+async function patchAction(patchId, action) {
+  try {
+    await api(`/admin/patch/${action}`, 'POST', { patch_id: patchId, api_key: apiKey });
+    alert(`${action==='approve'?t('prop.approve'):t('prop.reject')} done`);
+    loadPatches();
+  } catch (e) {
+    alert(`Failed: ${e.message}`);
+  }
+}
+
+/* ── 감사 로그 ── */
+async function loadAudit() {
+  try {
+    const data = await api('/admin/audit');
+    const logs = data.logs || [];
+    const el   = document.getElementById('audit-log');
+    el.innerHTML = logs.length
+      ? logs.map(l => renderLogEntry(l)).join('')
+      : `<div class='empty'>${t('dash.no_logs')}</div>`;
+  } catch (e) {
+    document.getElementById('audit-log').innerHTML = `<div class="empty">${e.message}</div>`;
+  }
+}
+
+function renderLogEntry(l) {
+  const blocked  = l.blocked || l.event?.includes('BLOCK') || l.event?.includes('REJECT');
+  const override = l.admin_override;
+  const cls = override ? 'log-override' : (blocked ? 'log-blocked' : 'log-allowed');
+  return `<div class="log-entry ${cls}">
+    <span class="log-time">${(l.time||l.timestamp||'').slice(11,19)}</span>
+    <span>[${l.event||l.action||'EVENT'}] ${l.detail||l.query||''}</span>
+  </div>`;
+}
+
+/* ── 언어 전환 — i18n.js의 t() 사용으로 대체됨 ── */
+function onLanguageChange(lang) {
+  // 구 I18N 딕셔너리 제거 — applyTranslations()로 자동 처리
+}
+
+/* ── 설정 — 드롭다운 연동 ── */
+// 보호 파일 목록 (고정 + 동적)
+const PROTECTED_CANDIDATES = [
+  { file: 'core/security_layer.py',  label: '🔐 Security Layer',  default: true  },
+  { file: 'core/auth.py',            label: '🔑 Auth Module',      default: true  },
+  { file: 'config.py',               label: '⚙️  Config File',     default: true  },
+  { file: 'server_llmwiki.py',       label: '🌐 FastAPI Server',   default: false },
+  { file: 'core/graph_engine.py',    label: '🕸️  Graph Engine',    default: false },
+  { file: 'core/reasoning_engine.py',label: '🧠 Reasoning Engine', default: false },
+  { file: 'core/vector_store.py',    label: '🗄️  Vector Store',    default: false },
+];
+
+
+function buildProtectedCheckboxes(currentProtected = []) {
+  const container = document.getElementById('protected-checkboxes');
+  if (!container) return;
+  const checked = new Set(
+    typeof currentProtected === 'string'
+      ? currentProtected.split(',').map(s => s.trim()).filter(Boolean)
+      : (Array.isArray(currentProtected) ? currentProtected : [])
+  );
+  container.innerHTML = PROTECTED_CANDIDATES.map(c => `
+    <label style="display:flex;align-items:center;gap:8px;
+                  cursor:pointer;font-size:13px;padding:3px 0">
+      <input type="checkbox" class="protected-chk" value="${c.file}"
+             ${checked.has(c.file) || (checked.size === 0 && c.default) ? 'checked' : ''}
+             style="accent-color:var(--accent);width:14px;height:14px">
+      <span>${c.label}</span>
+      <span style="font-size:10px;color:var(--muted);font-family:var(--font-mono)">${c.file}</span>
+    </label>
+  `).join('');
+}
+
+function getProtectedFiles() {
+  return Array.from(
+    document.querySelectorAll('.protected-chk:checked')
+  ).map(cb => cb.value).join(',');
+}
+
+async function loadSettings() {
+  try {
+    const data = await api('/admin/settings');
+
+    // LLM 드롭다운
+    const modelSel = document.getElementById('set-model');
+    if (modelSel && data.model) {
+      const opt = Array.from(modelSel.options).find(o => o.value === data.model);
+      if (opt) modelSel.value = data.model;
+      else {
+        // 현재 모델이 목록에 없으면 동적 추가
+        const newOpt = document.createElement('option');
+        newOpt.value = data.model;
+        newOpt.textContent = `🔧 ${data.model} (${t('set.current')})`;
+        modelSel.prepend(newOpt);
+        modelSel.value = data.model;
+      }
+    }
+    // 현재 모델 배지 표시
+    const badge = document.getElementById('model-current-badge');
+    if (badge && data.model) {
+      badge.textContent = `${t('set.model_checking').replace('checking...','').trim()} ${data.model}`;
+    }
+
+    // Max Loop 슬라이더
+    const loopEl  = document.getElementById('set-loop');
+    const loopVal = document.getElementById('set-loop-val');
+    if (loopEl && data.max_loop) {
+      loopEl.value = data.max_loop;
+      if (loopVal) loopVal.textContent = data.max_loop;
+    }
+
+    // 보호 파일 체크박스
+    buildProtectedCheckboxes(data.protected || '');
+
+    // persona 로드
+    const p = data.persona || {};
+    if (p.name)   document.getElementById('set-name').value   = p.name;
+    if (p.style)  document.getElementById('set-style').value  = p.style;
+    if (p.custom) document.getElementById('set-custom').value = p.custom;
+
+    const lang    = p.language || 'Korean';
+    const langSel = document.getElementById('set-language');
+    if (langSel) {
+      const opt = Array.from(langSel.options).find(o => o.value === lang);
+      if (opt) langSel.value = lang;
+    }
+    updatePersonaPreview(p);
+  } catch (e) {
+    console.error('loadSettings:', e);
+    // 체크박스는 기본값으로 초기화
+    buildProtectedCheckboxes('');
+  }
+}
+
+function updatePersonaPreview(p) {
+  const el = document.getElementById('persona-preview');
+  if (!el) return;
+  const name = p.name || t('app.name');
+  const style = p.style || '';
+  const lang = p.language || 'Korean';
+  el.textContent = `→ LLM: "Your name is ${name}. ${style ? `You are ${style}. ` : ''}Always answer in ${lang}요."`;
+}
+
+async function savePersona() {
+  const name     = document.getElementById('set-name').value.trim();
+  const style    = document.getElementById('set-style').value.trim();
+  const language = document.getElementById('set-language').value.trim();
+  const custom   = document.getElementById('set-custom').value.trim();
+
+  if (!name && !style && !language) {
+    alert(t('set.persona_required'));
+    return;
+  }
+
+  const body = { api_key: apiKey, name, style, language, custom };
+
+  try {
+    const r = await fetch(`${API}/admin/persona`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await r.json();
+
+    if (!r.ok) {
+      alert(`❌ Save failed (${r.status})\n${data.detail || JSON.stringify(data)}`);
+      return;
+    }
+
+    if (data.success) {
+      alert(`${t('set.persona_saved')}\n${JSON.stringify(data.saved||{})}`);
+      updatePersonaPreview(data.persona || body);
+    } else {
+      alert(`Save failed: ${JSON.stringify(data)}`);
+    }
+  } catch (e) {
+    alert(`❌ Network error: ${e.message}\nCheck that the server is running.`);
+  }
+}
+
+async function saveSettings() {
+  const body = {
+    api_key:         apiKey,
+    model:           document.getElementById('set-model').value,
+    max_loop:        parseInt(document.getElementById('set-loop').value) || 2,
+    protected_files: getProtectedFiles(),
+  };
+  try {
+    await api('/admin/settings', 'POST', body);
+    // 현재 모델 배지 갱신
+    const badge = document.getElementById('model-current-badge');
+    if (badge) badge.textContent = `${t('set.model_checking').replace('checking...','').trim()} ${body.model}`;
+    alert(t('set.server_saved'));
+  } catch (e) {
+    alert(`Failed: ${e.message}`);
+  }
+}
+
+/* ── 자기진화 제안 ── */
+
+let _currentProposalId = null;
+
+async function loadProposals() {
+  try {
+    const data = await api('/admin/proposals/?status=pending');
+    const tbody = document.getElementById('proposals-body');
+    const proposals = data.proposals || [];
+
+    if (!proposals.length) {
+      tbody.innerHTML = `<tr><td colspan='5' class='empty'>${t('prop.no_pending')}</td></tr>`;
+      return;
+    }
+
+    const riskColor = { low:'var(--success)', medium:'var(--warn)', high:'var(--danger)' };
+    tbody.innerHTML = proposals.map(p => {
+      const isWebLearn = p.type === 'knowledge_update' &&
+                         p.metadata?.auto_action === 'web_learn';
+      const topic = p.metadata?.topic || '';
+      const actionBtns = isWebLearn
+        ? `<button class="btn btn-approve" style="font-size:10px;background:#4fc3f7"
+             onclick="executeWebLearnProposal('${p.proposal_id}','${topic}',this)">
+             ${t('prop.web_search')}
+           </button>
+           <button class="btn btn-reject" style="font-size:10px"
+             onclick="rejectProposalById('${p.proposal_id}')">❌ Reject</button>`
+        : `<button class="btn btn-approve" style="font-size:10px"
+             onclick="approveProposal('${p.proposal_id}')">✅ Approve</button>
+           <button class="btn btn-reject" style="font-size:10px"
+             onclick="rejectProposalById('${p.proposal_id}')">❌ Reject</button>`;
+
+      return `<tr>
+        <td><span class="mono" style="font-size:10px">${p.type}</span></td>
+        <td><span style="color:${riskColor[p.risk]||'var(--muted)'}">
+          ${p.risk?.toUpperCase() || '-'}</span></td>
+        <td style="max-width:320px;font-size:12px">${p.title}</td>
+        <td class="mono">${p.created_at?.slice(0,16) || '-'}</td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn" style="font-size:10px;background:var(--surface);
+            border:1px solid var(--border);color:var(--text)"
+            onclick="showProposalDetail('${p.proposal_id}',\`${escAdm(p.title)}\`,\`${escAdm(p.description)}\n\n${escAdm(p.content?.slice(0,600))}\`)">
+            ${t('prop.detail')}
+          </button>
+          ${actionBtns}
+        </td>
+      </tr>`;
+    }).join('');
+
+  } catch (e) {
+    document.getElementById('proposals-body').innerHTML =
+      `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+function escAdm(s) {
+  return (s || '').replace(/`/g, "'").replace(/\n/g, '\\n').slice(0, 300);
+}
+
+function showProposalDetail(id, title, content) {
+  _currentProposalId = id;
+  const detail = document.getElementById('proposal-detail');
+  const dc     = document.getElementById('proposal-detail-content');
+  detail.style.display = 'block';
+  dc.textContent = `[${id}]\n${title}\n\n${content.replace(/\\n/g, '\n')}`;
+
+  document.getElementById('detail-approve-btn').onclick = () => approveProposal(id);
+  document.getElementById('detail-reject-btn').onclick  = () => rejectProposalById(id);
+  detail.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function approveProposal(proposalId) {
+  if (!confirm(t('prop.approve_confirm'))) return;
+  try {
+    const r = await api(`/admin/proposals/${proposalId}/approve`, 'POST',
+                        {api_key: apiKey});
+    const status = r.success ? '✅ Success' : t('hw.llm_failed');
+    alert(`${t('prop.execute_done')}\n\n${status}: ${r.message||''}\n${t('prop.elapsed')}: ${r.elapsed_sec}s`);
+    await loadProposals();
+    await loadEvoReports();
+    document.getElementById('proposal-detail').style.display = 'none';
+  } catch (e) {
+    alert(`Approve failed: ${e.message}`);
+  }
+}
+
+async function rejectProposalById(proposalId) {
+  const reason = prompt(t('prop.reject_prompt')) || '';
+  try {
+    await api(
+      `/admin/proposals/${proposalId}/reject?reason=${encodeURIComponent(reason)}`,
+      'POST'
+    );
+    // [4-C] Reject 사유 → memory_store 장기기억 저장
+    if (reason.trim()) {
+      try {
+        await api('/admin/memory/save-rejection', 'POST', {
+          proposal_id: proposalId,
+          reason:      reason.trim(),
+        });
+        toast(t('prop.rejected_saved'), 'success');
+      } catch { toast(t('prop.rejected'), 'success'); }
+    } else {
+      toast(t('prop.rejected'), 'success');
+    }
+    await loadProposals();
+    document.getElementById('proposal-detail').style.display = 'none';
+  } catch (e) {
+    alert(`Reject failed: ${e.message}`);
+  }
+}
+
+/* ── [4-C] 웹 검색 제안 실행 ── */
+async function executeWebLearnProposal(proposalId, topic, btn) {
+  if (!confirm(
+    t('prop.web_confirm',{topic}) +
+    `${t('learn.web_duration')}`
+  )) return;
+  btn.disabled   = true;
+  btn.textContent = t('prop.searching');
+  try {
+    // 웹 검색 학습 실행
+    const r = await api(
+      `/admin/learn/topic/?topic=${encodeURIComponent(topic)}&use_web=true`, 'POST'
+    );
+    if (r.success) {
+      // proposal Approve 처리
+      await api(`/admin/proposals/${proposalId}/approve`, 'POST');
+      toast(t('learn.web_done')+` [${r.domain}]`, 'success');
+      btn.textContent = t('prop.completed');
+      btn.style.background = '#4caf7d';
+      await loadProposals();
+      // 지식 레벨 UI 갱신
+      setTimeout(() => loadKnowledge(), 1000);
+    } else {
+      throw new Error(r.message || 'Learning failed');
+    }
+  } catch(e) {
+    btn.textContent = '❌ Failed';
+    btn.disabled = false;
+    alert(`Execution failed: ${e.message}`);
+  }
+}
+
+async function generateProposals() {
+  const btn = event.target;
+  btn.textContent = t('prop.analyzing');
+  btn.disabled = true;
+  try {
+    const r = await api('/admin/proposals/generate/', 'POST');
+    if (r.generated > 0) {
+      toast(t('prop.generated',{count:r.generated}), 'success');
+      await loadProposals();
+    } else {
+      toast(t('prop.no_signals'), 'success');
+    }
+  } catch (e) {
+    alert(`Generation failed: ${e.message}`);
+  } finally {
+    btn.textContent = t('prop.generate');
+    btn.disabled = false;
+  }
+}
+
+/* ── 진화 보고서 ── */
+
+async function loadEvoReports() {
+  try {
+    const data = await api('/admin/evo-reports/');
+    const tbody = document.getElementById('evo-reports-body');
+    const reports = data.reports || [];
+
+    tbody.innerHTML = reports.length
+      ? reports.map(r => `
+          <tr>
+            <td class="mono">${r.executed_at?.slice(0,16) || '-'}</td>
+            <td class="mono">${r.type || '-'}</td>
+            <td style="font-size:12px">${r.title || '-'}</td>
+            <td style="color:${r.success ? 'var(--success)' : 'var(--danger)'}">
+              ${r.success ? '✅ Success' : '❌ Failed'}: ${(r.message||'').slice(0,40)}</td>
+            <td class="mono">${r.elapsed_sec ?? '-'}s</td>
+          </tr>`)
+        .join('')
+      : `<tr><td colspan='5' class='empty'>${t('evo.no_reports')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('evo-reports-body').innerHTML =
+      `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+/* ── 성능 평가 ── */
+
+async function loadPerformance() {
+  try {
+    const data = await api('/admin/performance/metrics/');
+    const perf = data.performance || {};
+    const imp  = data.importance  || {};
+
+    const gradeColor = { A:'var(--success)', B:'var(--accent2)',
+                         C:'var(--warn)', D:'var(--danger)', 'N/A':'var(--muted)' };
+    const last = await api('/admin/performance/history/?limit=1');
+    const lastGrade = last.history?.[0]?.grade || 'N/A';
+
+    document.getElementById('perf-cards').innerHTML = `
+      <div class="card"><div class="card-label">${t('perf.grade')}</div>
+        <div class="card-value" style="color:${gradeColor[lastGrade]}">${lastGrade}</div></div>
+      <div class="card"><div class="card-label">${t('perf.avg_retrieval')}</div>
+        <div class="card-value accent">${((perf.avg_retrieval_score||0)*100).toFixed(0)}%</div></div>
+      <div class="card"><div class="card-label">${t('perf.avg_speed')}</div>
+        <div class="card-value ${(perf.avg_response_sec||0)>15?'danger':'success'}">
+          ${(perf.avg_response_sec||0).toFixed(1)}s</div></div>
+      <div class="card"><div class="card-label">${t('perf.high_importance')}</div>
+        <div class="card-value warn">${imp.high_importance||0}</div></div>
+      <div class="card"><div class="card-label">${t('perf.repeat_errors')}</div>
+        <div class="card-value warn">${imp.repeated_errors||0}</div></div>
+      <div class="card"><div class="card-label">${t('perf.eval_count')}</div>
+        <div class="card-value accent">${perf.eval_count||0}</div></div>
+    `;
+    await loadPerfHistory();
+  } catch (e) {
+    document.getElementById('perf-cards').innerHTML =
+      `<div class="empty">${e.message}</div>`;
+  }
+}
+
+async function loadPerfHistory() {
+  try {
+    const data  = await api('/admin/performance/history/?limit=10');
+    const tbody = document.getElementById('perf-history-body');
+    const gradeColor = { A:'var(--success)', B:'var(--accent2)',
+                         C:'var(--warn)', D:'var(--danger)' };
+    tbody.innerHTML = (data.history || []).map(h => `
+      <tr>
+        <td class="mono">${h.evaluated_at?.slice(0,16)||'-'}</td>
+        <td style="color:${gradeColor[h.grade]||'var(--muted)'}">
+          <strong>${h.grade}</strong></td>
+        <td class="mono">${h.total_score?.toFixed(1)||'-'}/100</td>
+        <td class="mono">${((h.metrics?.avg_retrieval_score||0)*100).toFixed(0)}%</td>
+        <td class="mono">${h.metrics?.avg_response_sec?.toFixed(1)||'-'}s</td>
+        <td style="font-size:11px;color:var(--warn)">
+          ${(h.issues||[]).slice(0,2).join(' / ')||'-'}</td>
+      </tr>`).join('')
+      || `<tr><td colspan='6' class='empty'>${t('perf.no_history')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('perf-history-body').innerHTML =
+      `<tr><td colspan="6" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+async function runEvaluation() {
+  const btn = event.target;
+  btn.textContent = t('perf.running'); btn.disabled = true;
+  try {
+    const r = await api('/admin/performance/evaluate/', 'POST');
+    const gc = { A:'✅', B:'🟡', C:'🟠', D:'❌' };
+    alert(`${t('perf.eval_done',{grade:r.grade,score:r.total_score,issues:(r.issues||[]).join(', ')||t('perf.no_issue')} )}`);
+    await loadPerformance();
+  } catch (e) {
+    alert(`${t('perf.eval_failed',{msg:e.message})}`);
+  } finally {
+    btn.textContent = t('perf.run_now'); btn.disabled = false;
+  }
+}
+
+/* ── 자기학습 ── */
+
+async function loadLearning() {
+  try {
+    const data  = await api('/admin/learn/error-queries/?min_count=2');
+    const tbody = document.getElementById('error-queries-body');
+    tbody.innerHTML = (data.error_queries || []).map(q => `
+      <tr>
+        <td style="font-size:12px">${q.query?.slice(0,50)||'-'}</td>
+        <td class="mono">${q.count} times</td>
+        <td class="mono">${(q.avg_score*100).toFixed(0)}%</td>
+        <td class="mono">${q.last?.slice(0,10)||'-'}</td>
+        <td>
+          <button class="btn btn-approve" style="font-size:10px"
+            onclick="learnSingleTopic('${(q.query||'').replace(/'/g,"\\'")}')">
+            Learn</button>
+        </td>
+      </tr>`).join('')
+      || `<tr><td colspan='5' class='empty'>${t('learn.no_errors')}</td></tr>`;
+  } catch (e) {
+    document.getElementById('error-queries-body').innerHTML =
+      `<tr><td colspan="5" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+async function learnTopic() {
+  const topic  = document.getElementById('learn-topic-input')?.value.trim();
+  const result = document.getElementById('learn-result');
+  if (!topic) { alert(t('learn.enter_topic')); return; }
+  if (result) result.textContent = `${t('learn.in_progress',{topic})}`;
+  await learnSingleTopic(topic);
+}
+
+/* ── [U-1] 웹 검색 장기 학습 (통합 파이프라인) ── */
+async function webLearnTopic() {
+  const input  = document.getElementById('web-learn-input');
+  const result = document.getElementById('web-learn-result');
+  const topic  = input?.value.trim();
+  if (!topic) { alert(t('learn.enter_search_topic')); return; }
+
+  if (result) {
+    result.style.display = 'block';
+    result.innerHTML = `
+      <div style="color:var(--muted)">
+        ${t('learn.web_step1')}<br>
+        ${t('learn.web_step2')}<br>
+        ${t('learn.web_step3')}<br>
+        ${t('learn.web_step4')}
+      </div>
+      <div style="color:var(--muted);font-size:11px;margin-top:6px">
+        (20-40s)
+      </div>`;
+  }
+
+  try {
+    const r = await api(
+      `/admin/learn/topic/?topic=${encodeURIComponent(topic)}&use_web=true`, 'POST'
+    );
+
+    if (r.success) {
+      const sourceLinks = (r.sources||[])
+        .map(u => `<a href="${u}" target="_blank"
+          style="color:var(--accent);font-size:10px;word-break:break-all">${u.slice(0,60)}</a>`)
+        .join('<br>');
+
+      const domainBadge = r.domain
+        ? `<span style="background:var(--accent);color:#fff;border-radius:4px;
+                        padding:2px 8px;font-size:10px">${r.domain}</span>`
+        : '';
+
+      const fetchedNote = r.fetched_urls > 0
+        ? `<span style="color:#4caf7d;font-size:10px">
+             ✅ ${r.fetched_urls} URL(s) fetched</span>`
+        : `<span style="color:var(--muted);font-size:10px">
+             ${t('learn.web_no_url')}</span>`;
+
+      result.innerHTML = `
+        <div style="color:#4caf7d;font-weight:700;margin-bottom:8px;
+                    display:flex;align-items:center;gap:8px">
+          ${t('learn.web_done')}  ${domainBadge}
+        </div>
+        <div style="background:var(--bg);border-radius:6px;padding:10px;
+                    margin-bottom:8px;font-size:12px;line-height:1.7;
+                    white-space:pre-wrap">${r.knowledge || ''}</div>
+        <div style="font-size:11px;color:var(--muted)">
+          📄 wiki: ${r.wiki_path ? r.wiki_path.split(/[\\/]/).pop() : '-'}<br>
+          ${fetchedNote}<br>
+          📚 Sources (${(r.sources||[]).length}):<br>
+          ${sourceLinks}
+        </div>`;
+
+      toast(`✅ Long-term knowledge saved: '${r.topic}' [${r.domain}]`, 'success');
+      setTimeout(() => loadKnowledge(), 1000);
+      if (input) input.value = '';
+    } else {
+      result.innerHTML = `<span style="color:var(--warn)">⚠️ ${r.message}</span>`;
+    }
+  } catch(e) {
+    if (result) result.innerHTML =
+      `<span style="color:var(--red)">❌ Failed: ${e.message}</span>`;
+  }
+}
+
+async function learnSingleTopic(topic) {
+  const result = document.getElementById('learn-result');
+  try {
+    const r = await api(`/admin/learn/topic/?topic=${encodeURIComponent(topic)}`, 'POST');
+    const msg = r.success
+      ? `✅ '${r.topic}' learned (quality: ${(r.quality*100).toFixed(0)}%) — Proposal: ${r.proposal_id}`
+      : `⚠️ '${topic}' ${r.message}`;
+    if (result) result.textContent = msg;
+    if (r.success) {
+      toast(msg, 'success');
+      await loadProposals();
+    }
+  } catch (e) {
+    if (result) result.textContent = `❌ Failed: ${e.message}`;
+  }
+}
+
+async function learnFromErrors() {
+  const result = document.getElementById('learn-result');
+  if (result) result.textContent = t('learn.auto_learning');
+  try {
+    const r = await api('/admin/learn/from-errors/', 'POST');
+    const msg = r.learned > 0
+      ? `${t('learn.auto_done',{count:r.learned,topics:(r.topics||[]).map(x=>x.topic).join(', ')})}`
+      : t('learn.no_detected');
+    if (result) result.textContent = msg;
+    if (r.learned > 0) { await loadProposals(); await loadLearning(); }
+  } catch (e) {
+    if (result) result.textContent = `❌ Failed: ${e.message}`;
+  }
+}
+
+/* ════════════════════════════════
+   P7-EVO-D: 성향 캐릭터 UI
+════════════════════════════════ */
+
+let _traits = [];
+let _radar  = null;
+
+async function loadCharacter() {
+  try {
+    const data = await api('/admin/character/');
+    _traits = data.traits || [];
+    renderTraitSliders(_traits);
+    renderRadarChart(_traits);
+  } catch (e) {
+    console.error('[CHARACTER]', e.message);
+  }
+}
+
+function renderTraitSliders(traits) {
+  const container = document.getElementById('trait-sliders');
+  const groups = {
+    A: t('char.group_a'), B: t('char.group_b'),
+    C: t('char.group_c'), D: t('char.group_d'), E: t('char.group_e')
+  };
+  let html = '';
+  let currentGroup = null;
+  traits.forEach(tr => {                          // t → tr (t()함수와 충돌 방지)
+    if (tr.group !== currentGroup) {
+      if (currentGroup) html += '</div>';
+      currentGroup = tr.group;
+      html += `<div style="margin-bottom:14px">
+        <div style="font-size:9px;color:var(--muted);font-family:var(--font-mono);
+          letter-spacing:1px;margin-bottom:6px">
+          GROUP ${tr.group} — ${groups[tr.group]||''}
+        </div>`;
+    }
+    const pct = Math.round(tr.value * 100);
+    const opp = { curiosity:'focus', focus:'curiosity', caution:'boldness',
+                  boldness:'caution', analytical:'intuitive', intuitive:'analytical',
+                  independent:'collaborative', collaborative:'independent' };
+    html += `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="width:22px;text-align:center">${tr.icon}</span>
+        <span style="width:80px;font-size:12px;color:var(--text)">${tr.label}</span>
+        <input type="range" min="0" max="100" value="${pct}"
+          id="trait-${tr.id}"
+          style="flex:1;accent-color:var(--accent)"
+          oninput="onTraitChange('${tr.id}', this.value, '${opp[tr.id]||''}')">
+        <span style="width:32px;font-size:11px;font-family:var(--font-mono);
+          color:var(--accent);text-align:right" id="val-${tr.id}">${pct}%</span>
+      </div>`;
+  });
+  if (currentGroup) html += '</div>';
+  container.innerHTML = html;
+}
+
+function onTraitChange(traitId, pct, opponent) {
+  const val = parseInt(pct);
+  document.getElementById(`val-${traitId}`).textContent = val + '%';
+  // 상충 성향 자동 조정
+  if (opponent) {
+    const oppVal = 100 - val;
+    const oppEl = document.getElementById(`trait-${opponent}`);
+    const oppLbl = document.getElementById(`val-${opponent}`);
+    if (oppEl) oppEl.value = oppVal;
+    if (oppLbl) oppLbl.textContent = oppVal + '%';
+  }
+  // 레이더 갱신
+  const idx = _traits.findIndex(t => t.id === traitId);
+  if (idx >= 0) {
+    _traits[idx].value = val / 100;
+    if (opponent) {
+      const oppIdx = _traits.findIndex(t => t.id === opponent);
+      if (oppIdx >= 0) _traits[oppIdx].value = (100 - val) / 100;
+    }
+    renderRadarChart(_traits);
+  }
+}
+
+function renderRadarChart(traits) {
+  const canvas = document.getElementById('radar-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W/2, cy = H/2, R = Math.min(W,H)/2 - 30;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const n = traits.length;
+  const angles = traits.map((_, i) => (i / n) * Math.PI * 2 - Math.PI/2);
+
+  // 배경 격자
+  const style = getComputedStyle(document.documentElement);
+  const border = style.getPropertyValue('--border').trim() || '#333';
+  const muted  = style.getPropertyValue('--muted').trim()  || '#666';
+  const accent = style.getPropertyValue('--accent').trim() || '#7c6af7';
+
+  [0.25, 0.5, 0.75, 1.0].forEach(r => {
+    ctx.beginPath();
+    angles.forEach((a, i) => {
+      const x = cx + Math.cos(a) * R * r;
+      const y = cy + Math.sin(a) * R * r;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  // 축
+  angles.forEach((a, i) => {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // 라벨
+    const lx = cx + Math.cos(a) * (R + 18);
+    const ly = cy + Math.sin(a) * (R + 18);
+    ctx.fillStyle = muted;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(traits[i].icon + ' ' + traits[i].label, lx, ly);
+  });
+
+  // 데이터 영역
+  ctx.beginPath();
+  angles.forEach((a, i) => {
+    const v = traits[i].value;
+    const x = cx + Math.cos(a) * R * v;
+    const y = cy + Math.sin(a) * R * v;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = `${accent}33`;
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // 데이터 포인트
+  angles.forEach((a, i) => {
+    const v = traits[i].value;
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(a)*R*v, cy + Math.sin(a)*R*v, 4, 0, Math.PI*2);
+    ctx.fillStyle = accent;
+    ctx.fill();
+  });
+}
+
+async function saveCharacter() {
+  let ok = true;
+  for (const tr of _traits) {
+    const el = document.getElementById(`trait-${tr.id}`);
+    if (!el) continue;
+    const val = parseInt(el.value) / 100;
+    try {
+      await api('/admin/character/', 'POST',
+        { api_key: apiKey, trait_id: tr.id, value: val });
+    } catch { ok = false; }
+  }
+  toast(ok ? t('char.save_ok') : t('char.save_warn'), ok ? 'success' : 'warn');
+}
+
+function resetCharacter() {
+  const defaults = { curiosity:.5, focus:.5, caution:.7, boldness:.3,
+    analytical:.6, intuitive:.4, independent:.5, collaborative:.5,
+    security:.9, creativity:.5, empathy:.5 };
+  _traits.forEach(tr => { tr.value = defaults[tr.id] ?? 0.5; });
+  renderTraitSliders(_traits);
+  renderRadarChart(_traits);
+}
+
+/* ════════════════════════════════
+   P7-EVO-E: 능력 성장 UI
+════════════════════════════════ */
+
+async function loadKnowledge() {
+  try {
+    const data = await api('/admin/knowledge/');
+    renderCapabilities(data.capabilities || []);
+    renderDomains(data.domains || []);
+    const gains = data.recent_gains || [];
+    const el = document.getElementById('recent-gains');
+    if (el && gains.length)
+      el.textContent = t('growth.recent_gains') + gains.join(' | ');
+  } catch (e) {
+    console.error('[KNOWLEDGE]', e.message);
+  }
+}
+
+function renderCapabilities(caps) {
+  const el = document.getElementById('capability-bars');
+  if (!el) return;
+  el.innerHTML = caps.map(c => `
+    <div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:13px">${c.icon} <strong>${c.label}</strong></span>
+        <span style="font-size:12px;font-family:var(--font-mono);color:var(--accent)">${c.pct}%</span>
+      </div>
+      <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden">
+        <div style="width:${c.pct}%;height:100%;background:var(--accent);
+          border-radius:4px;transition:width .5s ease"></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:3px">${c.desc}</div>
+    </div>`).join('');
+}
+
+function renderDomains(domains) {
+  const el = document.getElementById('domain-levels');
+  if (!el) return;
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">` +
+    domains.map(d => `
+      <div style="background:var(--surface);border:1px solid var(--border);
+        border-radius:8px;padding:14px">
+        <div style="display:flex;justify-content:space-between;
+                    align-items:center;margin-bottom:8px">
+          <span style="font-size:13px">${d.icon} <strong>${d.label}</strong></span>
+          <!-- [P2-11] 레벨 숫자: 굵고 크게 표시 -->
+          <span style="font-size:22px;font-weight:900;font-family:var(--font-mono);
+            color:${d.color};line-height:1;letter-spacing:-1px">
+            ${d.level}
+            <span style="font-size:11px;font-weight:400;color:var(--muted)">/ 10</span>
+          </span>
+        </div>
+        <div style="background:var(--bg);border-radius:4px;height:8px;overflow:hidden;margin-bottom:6px">
+          <div style="width:${d.pct}%;height:100%;
+            background:${d.color};border-radius:4px;
+            transition:width .6s ease;box-shadow:0 0 6px ${d.color}55"></div>
+        </div>
+        <!-- [P2-11] 실측 근거 표시 -->
+        <div style="display:flex;justify-content:space-between;
+                    font-size:10px;color:var(--muted);font-family:var(--font-mono)">
+          <span>📄 ${d.wiki_count ?? 0} wiki(s)</span>
+          <span>score ${d.score ?? 0}</span>
+        </div>
+      </div>`).join('') + '</div>';
+}
+
+/* ── [P3-1] 하드웨어 장비 현황 ── */
+async function loadHardware() {
+  try {
+    const data = await api('/hardware/');
+    const specs = data.specs || {};
+
+    const rankEl  = document.getElementById('hw-rank-badge');
+    const labelEl = document.getElementById('hw-rank-label');
+    if (rankEl) {
+      const lv   = specs.overall_level || 1;
+      const stars = '★'.repeat(Math.min(lv, 10));
+      rankEl.textContent = `Lv.${lv}  ${stars}`;
+      rankEl.style.color = lv >= 8 ? '#f06292' : lv >= 6 ? '#7c6af7' : '#4fc3f7';
+    }
+    if (labelEl) labelEl.textContent = specs.james_rank || '';
+
+    const cardsEl = document.getElementById('hw-cards');
+    if (cardsEl) {
+      const comps = [
+        { key:'cpu',  spec: specs.cpu  || {} },
+        { key:'ram',  spec: specs.ram  || {} },
+        { key:'gpu',  spec: specs.gpu  || {} },
+        { key:'disk', spec: specs.disk || {} },
+      ];
+      const lvColor = lv => lv >= 9 ? '#f06292' : lv >= 7 ? '#7c6af7'
+                           : lv >= 5 ? '#4fc3f7' : lv >= 3 ? '#4caf7d' : '#aaa';
+
+      cardsEl.innerHTML = comps.map(({ key, spec }) => {
+        const w   = spec.weapon || {};
+        const lv  = spec.level  || 0;
+        const col = lvColor(lv);
+        let detail = '';
+        if (key==='cpu')  detail=`${spec.cores||'?'} cores · ${spec.freq_mhz||'?'}MHz ${spec.usage_pct!=null?`· ${spec.usage_pct}%`:''}`;
+        if (key==='ram')  detail=`${spec.total_gb||'?'}GB total · ${spec.available_gb||'?'}GB free`;
+        if (key==='gpu')  detail=spec.found ? `${spec.name} (${spec.vram_gb||'?'}GB)` : t('hw.cpu_only');
+        if (key==='disk') detail=`${spec.total_gb||'?'}GB · free ${spec.free_gb||'?'}GB`;
+        return `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+              <div style="font-size:28px">${w.icon||'🔧'}</div>
+              <div><div style="font-weight:700;font-size:15px">${w.name||'?'}</div>
+                   <div style="font-size:10px;color:var(--muted)">${w.role||key}</div></div>
+              <div style="margin-left:auto;font-size:26px;font-weight:900;color:${col};font-family:var(--font-mono)">
+                ${lv}<span style="font-size:11px;font-weight:400;color:var(--muted)">/10</span></div>
+            </div>
+            <div style="background:var(--bg);border-radius:4px;height:6px;overflow:hidden;margin-bottom:8px">
+              <div style="width:${Math.min(100,lv*10)}%;height:100%;background:${col};border-radius:4px;transition:width .8s;box-shadow:0 0 8px ${col}66"></div>
+            </div>
+            <div style="font-size:11px;color:var(--muted);font-family:var(--font-mono);margin-bottom:4px">${detail}</div>
+            <div style="font-size:11px;color:var(--text)">${w.desc||''}</div>
+          </div>`;
+      }).join('');
+    }
+
+    const sysEl = document.getElementById('hw-sysinfo');
+    if (sysEl) sysEl.innerHTML = [
+      `🖥️  플랫폼:  ${specs.platform||'?'}`,
+      `⚔️  CPU:    ${specs.cpu?.name||'?'} (${specs.cpu?.cores||'?'}cores)`,
+      `🛡️  RAM:    ${specs.ram?.total_gb||'?'} GB`,
+      `🪄  GPU:    ${specs.gpu?.found ? specs.gpu?.name : t('hw.cpu_only')} ${specs.gpu?.vram_gb?`(${specs.gpu.vram_gb}GB)`:''}`,
+      `🎒  Disk:   ${specs.disk?.total_gb||'?'}GB (free ${specs.disk?.free_gb||'?'}GB)`,
+    ].map(l=>`<div>${l}</div>`).join('');
+
+    // [4-B] LLM 추천 로드
+    await loadLLMRecommend();
+
+  } catch(e) {
+    const el = document.getElementById('hw-cards');
+    if (el) el.innerHTML = `<div style="color:var(--muted)">측정 실패: ${e.message}</div>`;
+  }
+}
+
+/* ── [4-B] LLM 추천 + 설치 ── */
+async function loadLLMRecommend() {
+  const el = document.getElementById('llm-recommend-list');
+  if (!el) return;
+  try {
+    const [recData, instData] = await Promise.all([
+      api('/admin/llm/recommend'),
+      api('/admin/llm/installed').catch(() => ({ models: [] })),
+    ]);
+    const installed = new Set((instData.models||[]).map(m => m.name));
+    const recs      = recData.recommendations || [];
+    const feasible  = recs.filter(m => m.feasible);
+    const infeasible= recs.filter(m => !m.feasible);
+
+    const renderCard = (m) => {
+      const isInstalled = installed.has(m.name);
+      const purposes    = (m.purpose||[]).map(p => ({
+        chat:'💬',retrieval:'🔍',coding:'💻',multimodal:'🖼️'
+      }[p]||p)).join(' ');
+      const btnStyle = isInstalled
+        ? `background:#4caf7d;cursor:default`
+        : `background:var(--accent);cursor:pointer`;
+      const btnLabel = isInstalled ? t('hw.llm_installed') : `${t('hw.llm_install_btn',{size:m.size_gb})}`;
+      const cardBg   = isInstalled ? 'rgba(76,175,125,.08)' : 'var(--surface)';
+
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px;
+                           margin-bottom:8px;border-radius:8px;
+                           background:${cardBg};border:1px solid var(--border)">
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:13px">${m.name}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">
+            ${purposes} ${m.desc}
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);text-align:right;min-width:60px">
+          ${m.size_gb}GB
+        </div>
+        <button onclick="installLLM('${m.name}', this)"
+                style="border:none;border-radius:6px;padding:5px 12px;
+                       font-size:11px;font-weight:600;color:#fff;
+                       ${btnStyle}" ${isInstalled?'disabled':''}>
+          ${btnLabel}
+        </button>
+      </div>`;
+    };
+
+    el.innerHTML = `
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+        📊 GPU ${recData.specs_summary?.gpu || '?'} · RAM ${recData.specs_summary?.ram || '?'}
+        · ${t('hw.llm_feasible',{count:feasible.length})}
+      </div>
+      ${feasible.map(renderCard).join('')}
+      ${infeasible.length > 0 ? `
+        <details style="margin-top:8px">
+          <summary style="font-size:11px;color:var(--muted);cursor:pointer">
+            ${t('hw.llm_low_specs',{count:infeasible.length})}
+          </summary>
+          <div style="margin-top:8px;opacity:.6">
+            ${infeasible.map(m => `
+              <div style="display:flex;justify-content:space-between;
+                          padding:6px 0;border-bottom:1px solid var(--border);
+                          font-size:11px">
+                <span>${m.name}</span>
+                <span style="color:var(--muted)">${m.reason_fail||''}</span>
+              </div>`).join('')}
+          </div>
+        </details>` : ''}`;
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--muted);font-size:12px">
+      LLM 추천 실패: ${e.message}<br>
+      <span style="font-size:10px">Ollama가 실행 중인지 확인하세요</span>
+    </div>`;
+  }
+}
+
+async function installLLM(modelName, btn) {
+  if (!confirm(`'${modelName}' 다운로드하시겠습니까?\n(모델 크기에 따라 수분~수십분 소요)`)) return;
+  btn.disabled = true;
+  btn.textContent = t('hw.llm_installing');
+  btn.style.background = '#ffb74d';
+  try {
+    const r = await api(`/admin/llm/pull?model=${encodeURIComponent(modelName)}`, 'POST');
+    if (r.ok) {
+      btn.textContent = '✅ Installed';
+      btn.style.background = '#4caf7d';
+      toast(t('hw.llm_install_done',{model:modelName}), 'success');
+      // 어드민 설정 드롭다운 갱신
+      const sel = document.getElementById('set-model');
+      if (sel && !Array.from(sel.options).find(o => o.value === modelName)) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = modelName;
+        sel.add(opt);
+      }
+    } else {
+      throw new Error(r.error || t('hw.install_failed'));
+    }
+  } catch(e) {
+    btn.textContent = '❌ Failed';
+    btn.style.background = '#f06292';
+    btn.disabled = false;
+    alert(`Install failed: ${e.message}`);
+  }
+}
+

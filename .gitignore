@@ -1,0 +1,95 @@
+# ═══════════════════════════════════════════════════════════════
+#  PROJECT JAMES — .gitignore
+# ═══════════════════════════════════════════════════════════════
+
+# ── 시크릿 / 환경변수 (절대 커밋 금지) ─────────────────────────
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets/
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ── 가상환경 ────────────────────────────────────────────────────
+venv/
+env/
+ENV/
+.venv/
+
+# ── 데이터베이스 / 사용자 데이터 (런타임 생성) ─────────────────
+*.db
+*.sqlite
+*.sqlite3
+james_users.db
+james_audit.db
+james_sessions.db
+chroma_db/
+memory/
+workspace/
+uploads/
+backups/
+
+# ── ML 모델 / 임베딩 캐시 ──────────────────────────────────────
+models/
+*.bin
+*.gguf
+*.safetensors
+
+# ── 로그 / 임시 ────────────────────────────────────────────────
+*.log
+*.jsonl
+james_attack_log.jsonl
+.cache/
+tmp/
+temp/
+
+# ── IDE / OS ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── 테스트 결과 / 리포트 ───────────────────────────────────────
+reports/*.json
+reports/*.txt
+.coverage
+.pytest_cache/
+htmlcov/
+
+# ── 한국어 내부 노트 (개인 작업 파일) ──────────────────────────
+자메스_프로젝트_*
+레이어별_*
+중간_진행_*
+*.korean_notes
+docs/internal/
+
+# ── 백업 ───────────────────────────────────────────────────────
+*.bak
+*.backup
+james_backup_*/
+*.old
