@@ -1910,6 +1910,39 @@ const _OPPONENTS = {
   independent:'collaborative', collaborative:'independent',
 };
 
+// ─── Radar 시각 layout (그룹 클러스터링) ─────────────────────────
+// 16 슬롯 × 22.5° 간격. 그룹별 인접 배치 → 그룹 ring 색과 시각 일치.
+// 짝(A~D)은 같은 그룹 안에 있어 자연히 인접. 균형 우선.
+// backend TRAITS 순서와 동일 — 명시 layout 으로 backend 의존성 제거.
+const _RADAR_LAYOUT = [
+  // Group A — 인지 (12시 시작, 시계방향)
+  'curiosity', 'focus',
+  // Group B — 신중성
+  'caution', 'boldness',
+  // Group C — 사고
+  'analytical', 'intuitive',
+  // Group D — 사회성
+  'independent', 'collaborative',
+  // Group E — 핵심 가치 (3개)
+  'security', 'creativity', 'empathy',
+  // Group F — 표현 스타일 (5개, 외곽 ring 핑크색과 매칭)
+  'conciseness', 'directness', 'optimism', 'risk_tolerance', 'patience',
+];
+
+function _layoutForRadar(traits) {
+  // backend trait 들을 _RADAR_LAYOUT 순서로 재정렬.
+  // layout 에 없는 trait (forward-compat) 은 끝에 append.
+  const byId = {};
+  traits.forEach(t => { byId[t.id] = t; });
+  const ordered = [];
+  const seen = new Set();
+  _RADAR_LAYOUT.forEach(id => {
+    if (byId[id]) { ordered.push(byId[id]); seen.add(id); }
+  });
+  traits.forEach(t => { if (!seen.has(t.id)) ordered.push(t); });
+  return ordered;
+}
+
 async function loadCharacter() {
   try {
     // 두 API 병렬 호출 — traits + correlations.
@@ -1923,6 +1956,7 @@ async function loadCharacter() {
     renderInteractiveRadar();
     renderTraitSliders(_traits);
     renderConnectionsPanel(null);
+    renderCharacterSummary();
     // [P3 unified UX 2026-05-10] character 페이지의 Identity 섹션 prefill.
     loadIdentity();
   } catch (e) {
@@ -1939,13 +1973,16 @@ function renderInteractiveRadar() {
   const cx = W/2, cy = H/2;
   const R  = Math.min(W, H)/2 - 80;          // 라벨 공간 확보
 
-  const n = _traits.length;
+  // 짝(opposing pair) 이 180° 반대편에 배치되도록 layouted 순서.
+  // backend _traits 는 ID-keyed 함수에서 그대로 사용 (영향 X).
+  const traits = _layoutForRadar(_traits);
+  const n = traits.length;
   if (!n) { svg.innerHTML = ''; return; }
 
   // 각 trait의 angle (위쪽 12시 방향이 첫 trait, 시계방향).
-  const angles = _traits.map((_, i) => (i / n) * Math.PI * 2 - Math.PI/2);
+  const angles = traits.map((_, i) => (i / n) * Math.PI * 2 - Math.PI/2);
   const angleMap = {};
-  _traits.forEach((tr, i) => { angleMap[tr.id] = angles[i]; });
+  traits.forEach((tr, i) => { angleMap[tr.id] = angles[i]; });
 
   // 좌표 변환 — value(0..1) → (x, y).
   function pt(idx, v) {
@@ -1957,12 +1994,23 @@ function renderInteractiveRadar() {
 
   let inner = '';
 
-  // ─── 1) 격자 (4 단계) ────────────────────────────────────────
-  [0.25, 0.5, 0.75, 1.0].forEach(r => {
+  // ─── 1) 그룹별 동심원 ring (6 layer 입체 시각화) ────────────
+  // A=가장 안쪽(인지), F=가장 바깥(표현스타일). 색은 CSS .group-X 가 결정.
+  // value 비교성 유지를 위해 vertex 위치는 기존대로 base R × value 에 그대로.
+  // ring 들은 시각적 layer 표시만 — vertex 위치 계산과는 독립.
+  const _GROUP_RING_FACTORS = [
+    { group: 'a', factor: 0.20 },
+    { group: 'b', factor: 0.36 },
+    { group: 'c', factor: 0.52 },
+    { group: 'd', factor: 0.68 },
+    { group: 'e', factor: 0.84 },
+    { group: 'f', factor: 1.00 },
+  ];
+  _GROUP_RING_FACTORS.forEach(ring => {
     const pts = angles.map((a) =>
-      `${(cx + Math.cos(a)*R*r).toFixed(1)},${(cy + Math.sin(a)*R*r).toFixed(1)}`
+      `${(cx + Math.cos(a)*R*ring.factor).toFixed(1)},${(cy + Math.sin(a)*R*ring.factor).toFixed(1)}`
     ).join(' ');
-    inner += `<polygon class="radar-grid" points="${pts}"/>`;
+    inner += `<polygon class="radar-grid group-${ring.group}" points="${pts}"/>`;
   });
 
   // ─── 2) 축 + 라벨 ────────────────────────────────────────────
@@ -1973,7 +2021,7 @@ function renderInteractiveRadar() {
     // 라벨 (icon + 한글명) — 외곽
     const lx = cx + Math.cos(a) * (R + 30);
     const ly = cy + Math.sin(a) * (R + 30);
-    const tr = _traits[i];
+    const tr = traits[i];
     const labelText = (tr.label_ko || tr.label);
     inner += `
       <text class="radar-icon" x="${lx.toFixed(1)}" y="${(ly-8).toFixed(1)}"
@@ -1982,30 +2030,31 @@ function renderInteractiveRadar() {
             text-anchor="middle">${escapeHtml(labelText)}</text>`;
   });
 
-  // ─── 3) 짝(opposing) 연결선 — 매우 흐리게 ────────────────────
+  // ─── 3) 짝(opposing) 연결선 — 인접 trait 짧은 dashed line ────
   // 시각적으로 "두 trait이 1.0 sum 짝" 임을 알려줌.
+  // Group 클러스터링 layout 이라 짝은 같은 그룹 안 인접 위치 (22.5°).
   const drawnPairs = new Set();
-  _traits.forEach((tr, i) => {
+  traits.forEach((tr, i) => {
     const opp = _OPPONENTS[tr.id];
     if (!opp) return;
     const key = [tr.id, opp].sort().join('|');
     if (drawnPairs.has(key)) return;
     drawnPairs.add(key);
-    const j = _traits.findIndex(x => x.id === opp);
+    const j = traits.findIndex(x => x.id === opp);
     if (j < 0) return;
-    const p1 = pt(i, _traits[i].value);
-    const p2 = pt(j, _traits[j].value);
+    const p1 = pt(i, traits[i].value);
+    const p2 = pt(j, traits[j].value);
     inner += `<line class="pair-edge" x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}"
                     x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}"/>`;
   });
 
   // ─── 4) 상관관계 edges (선택된 trait 강조) ───────────────────
   _correlations.forEach((corr) => {
-    const i = _traits.findIndex(x => x.id === corr.from);
-    const j = _traits.findIndex(x => x.id === corr.to);
+    const i = traits.findIndex(x => x.id === corr.from);
+    const j = traits.findIndex(x => x.id === corr.to);
     if (i < 0 || j < 0) return;
-    const p1 = pt(i, _traits[i].value);
-    const p2 = pt(j, _traits[j].value);
+    const p1 = pt(i, traits[i].value);
+    const p2 = pt(j, traits[j].value);
     const sign = corr.weight >= 0 ? 'pos' : 'neg';
     const isActive = _selected_trait_id &&
                      (corr.from === _selected_trait_id || corr.to === _selected_trait_id);
@@ -2023,17 +2072,18 @@ function renderInteractiveRadar() {
   });
 
   // ─── 5) 데이터 폴리곤 (값 영역) ──────────────────────────────
-  const polyPts = _traits.map((tr, i) => {
+  const polyPts = traits.map((tr, i) => {
     const p = pt(i, tr.value);
     return `${p.x.toFixed(1)},${p.y.toFixed(1)}`;
   }).join(' ');
   inner += `<polygon class="radar-fill" points="${polyPts}"/>`;
 
-  // ─── 6) Vertex (드래그 가능) ─────────────────────────────────
-  _traits.forEach((tr, i) => {
+  // ─── 6) Vertex (드래그 가능) — 자기 group 색으로 ring 매칭 ──
+  traits.forEach((tr, i) => {
     const p = pt(i, tr.value);
     const sel = (tr.id === _selected_trait_id) ? ' selected' : '';
-    inner += `<circle class="radar-vertex${sel}"
+    const grpCls = tr.group ? ` group-${String(tr.group).toLowerCase()}` : '';
+    inner += `<circle class="radar-vertex${grpCls}${sel}"
                       cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6"
                       data-trait-id="${escapeHtml(tr.id)}"
                       data-axis-index="${i}">
@@ -2151,6 +2201,7 @@ function applyTraitChangeLocally(traitId, newValue, animate=true) {
   // SVG + 슬라이더 UI 동기화.
   renderInteractiveRadar();
   syncSlidersToTraits();
+  renderCharacterSummary();
   if (animate) {
     // (드래그 중에는 매 프레임 호출되므로 끄고, 종료 시 한번만 발화)
     animateRippleFor(traitId);
@@ -2181,7 +2232,94 @@ function animateRippleFor(sourceTid /*, _droppedValue */) {
   });
 }
 
-// ─── 우측 패널: 선택한 trait의 영향력 ────────────────────────────
+// ─── 자연어 요약 카드 (P5c, 2026-05-10) ───────────────────────────
+// 16 trait → 핵심/가치/스타일 3-line 자연어 요약. 룰 기반 — Python
+// CharacterProfile.build_summary 와 1:1 미러. 드래그/슬라이더 변경 시
+// 즉시 갱신되어 사용자가 "지금 캐릭터가 어떤 성격인지" 즉각 체감.
+function buildCharacterSummary(traits) {
+  // traits → {id: value} 맵.
+  const v = {};
+  (traits || []).forEach(tr => { v[tr.id] = tr.value; });
+  const get = (id, fb=0.5) => (id in v ? v[id] : fb);
+
+  // label 미러 — Python TRAITS[*].label_ko 와 동일 어휘.
+  const KO = {
+    curiosity: '탐구심', focus: '집중력',
+    caution:   '신중함', boldness: '과감함',
+    analytical:'분석력', intuitive: '직관력',
+    independent:'독립성', collaborative: '협력성',
+  };
+
+  // ── 핵심 (Group A~D 우세 사이드) ─────────────────────────
+  const pairs = [
+    ['curiosity', 'focus'], ['caution', 'boldness'],
+    ['analytical','intuitive'], ['independent','collaborative'],
+  ];
+  const dominants = [];
+  pairs.forEach(([a, b]) => {
+    const va = get(a), vb = get(b);
+    if (Math.abs(va - vb) >= 0.10) dominants.push(KO[va > vb ? a : b]);
+  });
+  const core = dominants.length
+    ? dominants.join('·') + '이 두드러진 성격'
+    : '여러 성향이 균형을 이룬 성격';
+
+  // ── 가치 (Group E) ────────────────────────────────────────
+  const eRules = [
+    ['security',  '보안에 매우 민감함', '보안의식이 약함'],
+    ['creativity','창의성이 풍부함',    '창의성은 보통 이하'],
+    ['empathy',   '공감능력이 높음',    '공감 표현이 절제됨'],
+  ];
+  const valueParts = [];
+  eRules.forEach(([id, hi, lo]) => {
+    const x = get(id);
+    if      (x >= 0.65) valueParts.push(hi);
+    else if (x <= 0.35) valueParts.push(lo);
+  });
+  const values = valueParts.length
+    ? valueParts.join(', ')
+    : '특정 가치 편향이 두드러지지 않음';
+
+  // ── 스타일 (Group F) ──────────────────────────────────────
+  const fRules = [
+    ['conciseness',    '간결한',          '설명이 풍부한'],
+    ['directness',     '직설적인',        '우회적인'],
+    ['optimism',       '낙관적인',        '신중한 톤의'],
+    ['risk_tolerance', '위험을 감수하는', '안전 우선의'],
+    ['patience',       '인내심 있는',     '결론이 빠른'],
+  ];
+  const styleParts = [];
+  fRules.forEach(([id, hi, lo]) => {
+    const x = get(id);
+    if      (x >= 0.65) styleParts.push(hi);
+    else if (x <= 0.35) styleParts.push(lo);
+  });
+  const style = styleParts.length
+    ? styleParts.join(', ') + ' 표현 스타일'
+    : '균형 잡힌 표현 스타일';
+
+  return { core, values, style };
+}
+
+function renderCharacterSummary() {
+  const card = document.getElementById('char-summary');
+  if (!card) return;
+  const s = buildCharacterSummary(_traits);
+  const setText = (id, txt) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  };
+  setText('char-summary-core',   s.core);
+  setText('char-summary-values', s.values);
+  setText('char-summary-style',  s.style);
+}
+
+// ─── 우측 패널: 선택한 trait의 영향력 (P5b 자연어화) ─────────────
+// 사용자 요구: trait id + raw weight 가 아닌 "쉽게 알아보고 이해" 가능한
+// 자연어 설명. 3 섹션:
+//   ① 짝 (Group A~D) — sum=1.0 자동 flip
+//   ② 이 성향이 강해지면 영향받는 것 (outgoing edges)
+//   ③ 이 성향에 영향을 주는 것 (incoming edges)
 function renderConnectionsPanel(tid) {
   const el = document.getElementById('char-connections');
   if (!el) return;
@@ -2193,44 +2331,92 @@ function renderConnectionsPanel(tid) {
   }
   const tr = _traits.find(x => x.id === tid);
   if (!tr) { el.innerHTML = ''; return; }
+  const traitName = tr.label_ko || tr.label;
 
-  // 짝 + 상관 trait 모두 모음.
-  const rows = [];
-  const opp = _OPPONENTS[tid];
-  if (opp) {
-    const o = _traits.find(x => x.id === opp);
-    if (o) rows.push({label: (o.label_ko || o.label), icon: o.icon, weight: -1.0, kind: 'pair'});
-  }
-  _correlations.forEach(c => {
-    if (c.from === tid) {
-      const o = _traits.find(x => x.id === c.to);
-      if (o) rows.push({label: (o.label_ko || o.label), icon: o.icon, weight: c.weight, kind: 'corr'});
-    }
-  });
+  // 강도 라벨 — |weight| 절대값 기준. damping 적용 후도 함께 표기.
+  const strengthLabel = (w) => {
+    const a = Math.abs(w);
+    if (a >= 0.40) return '강하게';
+    if (a >= 0.25) return '중간 정도로';
+    return '약하게';
+  };
 
-  let html = `<div style="font-size:12px;color:var(--accent);margin-bottom:6px">
-                ${escapeHtml(tr.icon)} ${escapeHtml(tr.label_ko || tr.label)}
-                <span style="color:var(--muted);font-size:11px">→ ${rows.length}</span>
+  // 짝 (Group A~D 만 존재)
+  const oppId = _OPPONENTS[tid];
+  const oppTr = oppId ? _traits.find(x => x.id === oppId) : null;
+
+  // outgoing — 이 성향이 변할 때 영향받는 것
+  const outEdges = _correlations
+    .filter(c => c.from === tid)
+    .map(c => ({ tr: _traits.find(x => x.id === c.to), weight: c.weight }))
+    .filter(r => r.tr);
+
+  // incoming — 이 성향에 영향을 주는 것
+  const inEdges = _correlations
+    .filter(c => c.to === tid)
+    .map(c => ({ tr: _traits.find(x => x.id === c.from), weight: c.weight }))
+    .filter(r => r.tr);
+
+  let html = `<div class="char-conn-header">
+                ${escapeHtml(tr.icon)} ${escapeHtml(traitName)}
+                <span style="color:var(--muted);font-size:11px;font-weight:400">
+                  · ${Math.round(tr.value*100)}%</span>
               </div>`;
-  if (rows.length === 0) {
-    html += `<div class="char-connections-empty">독립 성향 (다른 성향에 영향 없음)</div>`;
-  } else {
-    rows.forEach(r => {
+
+  // ─── 짝 섹션 ────────────────────────────────────────────────
+  if (oppTr) {
+    html += `<div class="char-conn-section">
+               <div class="char-conn-section-title">↔ 짝 (자동 1.0 합)</div>
+               <div class="char-conn-explain">
+                 ${escapeHtml(oppTr.icon)} <b>${escapeHtml(oppTr.label_ko || oppTr.label)}</b>이/가
+                 <span class="char-conn-weight neg">자동으로 반대 방향</span>으로 함께 움직입니다.
+               </div>
+             </div>`;
+  }
+
+  // ─── outgoing 섹션 — "이 성향이 강해지면..." ──────────────────
+  if (outEdges.length > 0) {
+    html += `<div class="char-conn-section">
+               <div class="char-conn-section-title">↑ ${escapeHtml(traitName)} 이/가 강해지면…</div>`;
+    outEdges.forEach(r => {
       const sign = r.weight >= 0 ? 'pos' : 'neg';
+      const verb = r.weight >= 0 ? '함께 강해집니다' : '약해집니다';
       const arrow = r.weight >= 0 ? '↑' : '↓';
-      let weightLabel;
-      if (r.kind === 'pair') {
-        weightLabel = '짝(1.0 합)';
-      } else {
-        const eff = (r.weight * _ripple_damping).toFixed(2);
-        weightLabel = `${arrow} ${(eff > 0 ? '+' : '')}${eff}`;
-      }
       html += `<div class="char-conn-row">
-                 <span class="char-conn-label">${escapeHtml(r.icon)} ${escapeHtml(r.label)}</span>
-                 <span class="char-conn-weight ${sign}">${escapeHtml(weightLabel)}</span>
+                 <span class="char-conn-label">
+                   ${escapeHtml(r.tr.icon)} <b>${escapeHtml(r.tr.label_ko || r.tr.label)}</b>이/가 ${verb}
+                 </span>
+                 <span class="char-conn-weight ${sign}">${arrow} ${strengthLabel(r.weight)}</span>
                </div>`;
     });
+    html += `</div>`;
   }
+
+  // ─── incoming 섹션 — "이 성향에 영향을 주는 것" ───────────────
+  if (inEdges.length > 0) {
+    html += `<div class="char-conn-section">
+               <div class="char-conn-section-title">↓ ${escapeHtml(traitName)} 에 영향을 주는 것</div>`;
+    inEdges.forEach(r => {
+      const sign = r.weight >= 0 ? 'pos' : 'neg';
+      const verb = r.weight >= 0 ? '강해지면 함께 강해집니다' : '강해지면 약해집니다';
+      const arrow = r.weight >= 0 ? '↑' : '↓';
+      html += `<div class="char-conn-row">
+                 <span class="char-conn-label">
+                   ${escapeHtml(r.tr.icon)} <b>${escapeHtml(r.tr.label_ko || r.tr.label)}</b>이/가 ${verb}
+                 </span>
+                 <span class="char-conn-weight ${sign}">${arrow} ${strengthLabel(r.weight)}</span>
+               </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // 독립 성향 (어디에도 연결 없음)
+  if (!oppTr && outEdges.length === 0 && inEdges.length === 0) {
+    html += `<div class="char-connections-empty" style="padding: 10px 0">
+               독립 성향 — 다른 성향과 연결되지 않습니다.
+             </div>`;
+  }
+
   el.innerHTML = html;
 }
 
@@ -2343,6 +2529,7 @@ function resetCharacter() {
   renderInteractiveRadar();
   renderTraitSliders(_traits);
   renderConnectionsPanel(null);
+  renderCharacterSummary();
 }
 
 // 글로벌 export — 인라인 onclick (HTML의 saveCharacter / resetCharacter).
