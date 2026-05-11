@@ -3,46 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0c0d10">
-<title>PROJECT JAMES</title>
+<meta name="theme-color" content="#0a0c11">
+<title>Secure Enterprise Knowledge Intelligence, Operating System</title>
+<link rel="stylesheet" href="/static/tokens.css">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-  /* ── 리셋 & 변수 ──
-     [#A8-9 2026-05-09] palette polish — 보고서 관리 시스템 분위기.
-     surface tone slightly cooler (slate ↔ navy mix) for a more
-     enterprise/intelligence look. Accent stays indigo but a touch
-     deeper. New --report-bg for "report card" backgrounds. */
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg:        #0a0c11;       /* deeper navy-black */
-    --surface:   #131620;       /* slate-tinted surface */
-    --surface-2: #181c26;
-    --border:    #262a36;
-    --border-2:  #1d212c;
-    --accent:    #5258e6;       /* deeper indigo, less playful */
-    --accent-soft: rgba(82,88,230,.13);
-    --accent-fg: #a7afff;
-    /* [#A8-9] secondary brand mark — "intelligence cyan" — used for
-       status badges + section dividers to suggest a knowledge OS. */
-    --brand-2:   #4fc3f7;
-    --brand-2-soft: rgba(79,195,247,.10);
-    --text:      #ececf1;
-    --text-soft: #c4c6cf;
-    --muted:     #8a8d99;
-    --muted-2:   #5d616c;
-    --success:   #22c55e;
-    --danger:    #ef4444;
-    --warn:      #f59e0b;
-    --radius:    8px;
-    --radius-lg: 10px;
-    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-    --font-ui:   'Inter', 'Pretendard', system-ui, -apple-system, sans-serif;
-    /* [#A8-9] subtle elevation for "report card" surfaces — answer
-       bubbles, settings rows, etc. Sits one notch above flat. */
-    --shadow-card: 0 1px 0 rgba(255,255,255,.02) inset,
-                   0 8px 24px rgba(0,0,0,.18);
-  }
 
   /* [#A8-9] thin top accent rail — gives every page a subtle "system
      header" stripe like enterprise dashboards. Doesn't move with
@@ -927,9 +891,7 @@
        the tagline frames it as a knowledge + security intelligence
        suite, not a chat toy. -->
   <div class="logo">
-    JAMES
-    <span>· Knowledge AI</span>
-    <span class="tagline">지식 · 보안 · 보고서 인텔리전스</span>
+    <span class="brand">Secure Enterprise Knowledge Intelligence,<span class="brand-tail">Operating System</span></span>
   </div>
   <div class="header-right">
     <div class="source-toggle">
@@ -1101,7 +1063,7 @@
       <div class="welcome" id="welcome">
         <!-- [#A8-9] welcome reframed: knowledge + security + report
              intelligence (was generic "Graph-RAG 지식 추론 엔진"). -->
-        <div class="welcome-title">Welcome to <span>JAMES</span></div>
+        <div class="welcome-title">Welcome to <span class="brand" style="font-size:inherit">Secure Enterprise Knowledge Intelligence,<span class="brand-tail">Operating System</span></span></div>
         <div class="welcome-sub">
           <span data-i18n="app.subtitle">지식·보안·보고서 인텔리전스 시스템</span><br>
           <span style="font-size:12px;color:var(--muted-2);font-family:var(--font-mono);
@@ -1262,7 +1224,7 @@
 <!-- ── 로그인 모달 ── -->
 <div class="modal-overlay hidden" id="login-modal" onclick="closeLoginOutside(event)">
   <div class="modal">
-    <div class="modal-title">▸ <span data-i18n="auth.login_title">JAMES 로그인</span></div>
+    <div class="modal-title">▸ <span data-i18n="auth.login_title">로그인</span></div>
     <div class="modal-field">
       <label data-i18n="auth.username">아이디</label>
       <input type="text" id="login-id" placeholder="admin"
@@ -1367,7 +1329,7 @@
 -->
 <div class="modal-overlay hidden" id="signup-modal" onclick="closeSignupOutside(event)">
   <div class="modal">
-    <div class="modal-title">▸ <span data-i18n="auth.signup_title">JAMES 회원가입</span></div>
+    <div class="modal-title">▸ <span data-i18n="auth.signup_title">회원가입</span></div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5"
          data-i18n="auth.signup_hint">
       가입 신청 후 관리자 승인을 거쳐야 로그인할 수 있습니다.

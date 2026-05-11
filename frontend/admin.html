@@ -3,33 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="theme-color" content="#0c0d10">
-<title>JAMES Admin</title>
+<meta name="theme-color" content="#0a0c11">
+<title>Secure Enterprise Knowledge Intelligence, Operating System — Admin</title>
+<link rel="stylesheet" href="/static/tokens.css">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg:        #0c0d10;
-    --surface:   #14161a;
-    --surface-2: #1a1d22;
-    --border:    #25282f;
-    --border-2:  #1c1f25;
-    --accent:    #6366f1;
-    --accent-soft: rgba(99,102,241,.12);
-    --accent-fg: #a5b4fc;
-    --text:      #ececf1;
-    --text-soft: #c4c6cf;
-    --muted:     #8a8d99;
-    --muted-2:   #5d616c;
-    --success:   #22c55e;
-    --danger:    #ef4444;
-    --warn:      #f59e0b;
-    --radius:    8px;
-    --radius-lg: 10px;
-    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-    --font-ui:   'Inter', 'Pretendard', system-ui, -apple-system, sans-serif;
-  }
 
   body {
     background: var(--bg);
@@ -459,7 +436,10 @@
 </head>
 <body>
 <header>
-  <div class="logo">JAMES <span>· Admin Console</span></div>
+  <div class="logo">
+    <span class="brand">Secure Enterprise Knowledge Intelligence,<span class="brand-tail">Operating System</span></span>
+    <span style="color:var(--muted);font-size:11px;margin-left:6px">· Admin Console</span>
+  </div>
   <div class="header-right">
     <!-- [STEP 5-A] 언어 토글 -->
     <button class="nav-btn" data-lang-toggle onclick="toggleLang()" title="Language / 언어"
@@ -889,7 +869,7 @@
             <div class="setting-sub" data-i18n="char.identity_name_desc">JAMES가 자신을 소개할 이름</div>
           </div>
           <input class="setting-value" type="text" id="set-name"
-                 placeholder="JAMES" data-i18n-placeholder="app.name">
+                 placeholder="JAMES">
         </div>
         <div style="padding: 12px 0; display:flex; justify-content:flex-end;">
           <button class="btn btn-primary" onclick="saveIdentity()"
@@ -1445,7 +1425,7 @@
 <!-- ── Admin 로그인 모달 ── -->
 <div class="modal-overlay" id="admin-login-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:300;">
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:36px;width:340px;box-shadow:0 24px 80px rgba(0,0,0,.7);">
-    <div style="font-size:15px;font-weight:600;font-family:var(--font-mono);color:var(--danger);margin-bottom:8px;letter-spacing:1px;">▸ JAMES ADMIN</div>
+    <div style="font-size:13px;font-weight:600;font-family:var(--font-mono);color:var(--danger);margin-bottom:8px;letter-spacing:.5px;">▸ Secure Enterprise Knowledge Intelligence, Operating System · Admin</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:24px;" data-i18n="auth.admin_required">Admin login required</div>
     <div style="margin-bottom:14px;">
       <div style="font-size:10px;color:var(--muted);letter-spacing:1px;font-family:var(--font-mono);margin-bottom:6px;">ADMIN ID</div>
@@ -1503,7 +1483,7 @@
      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);align-items:center;justify-content:center;z-index:320">
   <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:32px;width:360px;max-width:92vw;box-shadow:0 24px 80px rgba(0,0,0,.7)">
     <div style="font-size:15px;font-weight:600;color:var(--accent-fg);margin-bottom:6px"
-         data-i18n="auth.signup_title">▸ JAMES 회원가입</div>
+         data-i18n="auth.signup_title">▸ 회원가입</div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:18px;line-height:1.5"
          data-i18n="auth.signup_hint">
       가입 신청 후 관리자 승인을 거쳐야 로그인할 수 있습니다.
