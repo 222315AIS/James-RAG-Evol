@@ -304,6 +304,227 @@ change required to grant or revoke a feature for a role mid-flight.
 
 ---
 
+## 5.7 Cognitive Middleware Layer (v0.3, 2026-05-14)
+
+> Lives in `core/reasoning/` (new) + `core/retrieval/` (existing,
+> expanded). Plan + rationale in
+> `docs/handovers/v0.3-cognitive-layer-track.md`.
+
+JAMES is evolving from a retrieve-then-answer pipeline into a
+deliberative reasoning system. The cognitive middleware layer sits
+**between** the existing retrieval/graph engine and the LLM synthesis
+step. The graph / ontology / memory / policy core stays exactly as it
+is — middleware is **additive**, never a replacement.
+
+```
+        ┌────────────────────────────┐
+        │   Retrieval (existing)     │
+        └─────────────┬──────────────┘
+                      │
+        ┌─────────────▼──────────────┐
+        │   Cognitive Middleware     │
+        │   (this section, new)      │
+        │                            │
+        │   Planner                  │
+        │   Query Rewriter           │
+        │   Reflection Engine        │
+        │   Verification Engine      │
+        │   Tool Router              │
+        │   Memory Manager           │
+        │   Security Reasoner        │
+        │   Context Optimizer        │
+        └─────────────┬──────────────┘
+                      │
+        ┌─────────────▼──────────────┐
+        │   LLM Synthesis            │
+        └─────────────┬──────────────┘
+                      │
+        ┌─────────────▼──────────────┐
+        │   PolicyEngine.can_emit    │  ← Output filter (unchanged)
+        └─────────────┬──────────────┘
+                      │
+                  Response
+```
+
+### 5.7.1 Components
+
+| Component | Module (planned) | Responsibility |
+|---|---|---|
+| Planner | `core/reasoning/planner.py` | Decompose a question into ordered subtasks; choose retrieval depth |
+| Query Rewriter | `core/retrieval/query_rewriter.py` | Transform user intent into retrieval-optimized queries |
+| Reranker | `core/retrieval/rerank.py` | Cross-encoder reordering of vector-retrieved top-k |
+| Reflection Engine | `core/reasoning/reflect.py` | `draft → self_critique → revised` per subtask |
+| Verification Engine | `core/reasoning/verify.py` | `generator → critic → fact_checker → security_validator → final_synthesizer`. Wraps the CR-E (§5.6) primitive — every verifier outcome is a Change Request candidate |
+| Tool Router | `core/reasoning/tool_router.py` | Select between chat / web search / wiki edit / graph editor / memory write |
+| Memory Manager | `core/memory/manager.py` (existing dir, new module) | Choose which memory layer (episodic / semantic / procedural / working / long-term graph) to consult or write |
+| Security Reasoner | `core/reasoning/security_reasoner.py` | Reasons _about the policy graph itself_: prompt injection traces, privilege escalation attempts, relationship-based exposure |
+| Context Optimizer | `core/reasoning/context.py` | Bound token budget; drop low-relevance evidence; keep audit-required citations |
+
+Each module exports a typed interface. Direct dependency goes one way
+only: cognitive middleware imports retrieval / memory / policy, never
+the reverse.
+
+### 5.7.2 Trust zone
+
+| Edge | Trust | Hardening |
+|---|---|---|
+| Cognitive middleware → LLM | medium | every reflection / verification step emits one audit row (`reason_stage` + `applied_rule`) |
+| Cognitive middleware → PolicyEngine | enforced | `Planner` and `Tool Router` must ask `can_call_tool` before dispatch; bypass is a regression |
+| Verification → CR-E | enforced | a verifier flagging a self-modifying outcome (memory write, ontology edit, evolution patch) must route through `core/change_request.py` — direct apply is a CLAUDE.md rule #3 violation |
+| Reflection state | working memory only | not persisted by default; episodic memory captures only the **final** verified answer trace |
+
+#### Trace replay invariant
+
+Every reasoning step — planner decisions, reranker scores, reflection
+revisions, verification verdicts, tool router dispatches — emits a
+single row to the existing `audit_bridge` table. The **full reasoning
+trace must be reconstructable from `audit_bridge` rows alone**. No
+ephemeral in-memory state may carry decision rationale that audit
+cannot replay.
+
+This makes "why did the system answer X?" answerable post-hoc, which is
+one of JAMES's strongest differentiators (security-aware forensic
+reasoning, 2026-05-14 brief). The invariant is testable: a future
+"replay tool" reads `audit_bridge` for one question_id and reproduces
+the answer's decision tree. Any column the trace needs but cannot find
+is a regression.
+
+### 5.7.3 Multi-agent invariant (anti-sprawl)
+
+The middleware is allowed at most **five named agent roles**:
+
+```
+Orchestrator
+ ├─ Domain Specialist     (retrieval + synthesis for one subtask)
+ ├─ Verification Agent    (the verification engine wrapped as an agent)
+ ├─ Security Validator    (security_reasoner wrapped as an agent)
+ └─ Final Synthesizer     (writes the answer)
+```
+
+Adding a sixth agent role requires an architecture-labelled PR.
+Reasoning:
+
+- Agent count drives latency, hallucination compounding, debugging
+  surface, and token cost super-linearly. The reasoning literature
+  shows steep degradation past ~5 named roles.
+- A fixed cap forces architectural discipline. "We need another
+  agent" is almost always a hint to split a subtask or refactor an
+  existing role.
+- Domain-specific specialists (legal / food / retail / travel) are
+  still gated by **CLAUDE.md rule #1**: they are pack-level concerns
+  for the post-v1.0 plugin API, not platform middleware.
+
+#### Roles vs workers
+
+The five-role cap applies to **concurrent reasoning agents** — roles
+that participate simultaneously in answering one question. It does
+**not** restrict stateless workers invoked sequentially within a role.
+For example, the `Final Synthesizer` may internally call a draft
+worker, a citation-formatting worker, and a length-budget worker —
+those are functions, not agents.
+
+| Concept | Bound by §5.7.3 cap | Identity | Lifecycle |
+|---|---|---|---|
+| **Agent role** | Yes (≤ 5) | named, persistent across a question | activated by Orchestrator |
+| **Worker function** | No | stateless, no identity | called within one role |
+| **Tool** | No (capability allowlist instead — §5.5) | typed interface | invoked via Tool Router |
+
+The "writer / critic / outbound / triage / ..." style task-worker
+explosion (common in multi-agent operations frameworks) maps to
+**workers**, not agents, in JAMES terms. JAMES optimises for reasoning
+depth per role; agent count is the wrong knob.
+
+### 5.7.4 Bench gate
+
+Every PR that touches `core/retrieval/`, `core/reasoning/`, or any
+relation/graph traversal must include STEP 7 bench numbers per
+CLAUDE.md rule #2. Cognitive middleware additions are *expected* to
+improve precision / recall metrics; a PR that flatlines them needs
+either a non-quality justification (latency, memory) or a re-think.
+
+### 5.7.5 What this section is **not**
+
+- Not a new memory storage. The Memory Manager **dispatches** to
+  existing storage (`core/memory/store.py`, the graph, ChromaDB);
+  it does not introduce a competing store.
+- Not a replacement for `PolicyEngine`. Security Reasoner *uses* the
+  PolicyEngine to make inferences; it does not authorize anything
+  on its own.
+- Not a domain pack. Legal / food / retail reasoning belongs in
+  packs (post-v1.0), not the middleware.
+
+### 5.7.6 Memory scope layering
+
+Cognitive middleware reads and writes memory across **three scopes**.
+The layering is policy-aware (every scope crossing goes through the
+PolicyEngine) and inheritance is **read-only downward**: a session may
+read its workspace's graph, but a session write never automatically
+escapes its scope.
+
+```
+┌────────────────────────────────────────────────────┐
+│  system scope     — ontology, policy, evolutions  │
+│       inherited read-only by ↓                     │
+├────────────────────────────────────────────────────┤
+│  workspace scope  — per-deployment knowledge       │
+│       inherited read-only by ↓                     │
+├────────────────────────────────────────────────────┤
+│  session scope    — single conversation state      │
+│       writes never escape upward                   │
+└────────────────────────────────────────────────────┘
+```
+
+| Scope | Examples | Write path |
+|---|---|---|
+| **system** | ontology, `PolicyEngine` rules, self-evolution log | CR-E only (CLAUDE.md rule #3) |
+| **workspace** | wiki entities, vector store, audit log, scheduled jobs | admin via the existing endpoints; gated by `JAMES_WORKSPACE=<id>` env (currently single-tenant — see 5.7.7) |
+| **session** | working memory, intermediate reasoning state, draft answers | the cognitive middleware itself; cleared at conversation end unless promoted |
+
+**Promotion** (lower → higher scope) is **never automatic**. Examples:
+
+- A user's "save as long-term memory" action (chat modal from PR #264)
+  promotes a session insight to workspace scope — explicit click.
+- A self-evolution patch promotes a workspace-derived pattern to system
+  scope — explicit human approval (CR-E + approver_username).
+
+**Why this matters now**: JAMES today has shared-graph contamination
+risk (one workspace's noise can pollute retrieval for any session).
+The scope hierarchy is the structural fix. v0.3 ships the *namespace
+contract* (this section). Code lands as part of Phase 3 (memory
+expansion) in the cognitive-layer track.
+
+**Department brains (intelligence / legal / cyber / ops)** that the
+2026-05-14 brief described are **workspace-scoped plugins** under
+this model, not architectural primitives. They activate only after
+v1.0 + Plugin API. Until then, JAMES is mother-hardening (CLAUDE.md
+rule #1).
+
+### 5.7.7 Deployment isolation (deferred to v0.4)
+
+JAMES's isolation today is **policy-based**: RBAC + ABAC + PolicyEngine
++ Memory Trust + relation-sources cascade. This stack already prevents
+the threats that container isolation typically addresses (cross-tenant
+data leakage, privilege escalation, retrieval scope bleed).
+
+**Container-level isolation** (one Docker container per agent, or per
+workspace) is a v0.4 *operator option*, not a v0.3 requirement:
+
+- v0.3 default: single process, single workspace, all isolation
+  enforced at the PolicyEngine layer.
+- v0.4 option: `JAMES_WORKSPACE=<id>` env var (already seeded) maps
+  one process to one tenant. Multiple processes per host = multiple
+  workspaces. Docker is the operator's packaging choice; JAMES itself
+  is unaware of containers.
+- v0.4 hardening (separate PR, not this track): cross-workspace API
+  for federated queries with explicit role + audit gates.
+
+**This is a deliberate non-goal at v0.3** — adding container plumbing
+before the cognitive middleware is built would invert priorities. The
+brief's "12 containers per VPS" pattern is an *operations topology*, not
+an architecture; it sits on top of JAMES, not inside it.
+
+---
+
 ## 6. Data Lifecycle (W7-A, 2026-05-11)
 
 Every file uploaded through `/upload/` gets a tracking row in the
