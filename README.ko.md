@@ -203,6 +203,7 @@ JAMES는 보안을 **기능이 아닌 설계 원칙**으로 다룹니다:
 - [LightRAG](https://github.com/HKUDS/LightRAG)
 - [Graphiti](https://github.com/getzep/graphiti)
 - Palantir 스타일 온톨로지 접근법
+- YoungHu 실사용 피드백, 방향성 논의 기여
 
 ---
 
