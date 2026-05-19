@@ -1,4 +1,4 @@
-# PROJECT JAMES
+# PROJECT JAMES(with LEO)
 
 > **Security-focused, locally-runnable Graph-RAG knowledge engine**
 > with explicit reasoning paths and self-evolution scaffolding.
