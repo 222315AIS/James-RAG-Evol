@@ -204,6 +204,7 @@ Inspired by:
 - [LightRAG](https://github.com/HKUDS/LightRAG)
 - [Graphiti](https://github.com/getzep/graphiti)
 - Palantir-style ontology approaches
+- Architectural direction, Platform Readiness gates, and roadmap framing are discussed with LEO, continuing collaborator on this work, and that's how we intend to keep it.
 
 ---
 
