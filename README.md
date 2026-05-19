@@ -1,4 +1,4 @@
-# PROJECT JAMES(with LEO)
+# PROJECT JAMES
 
 > **Security-focused, locally-runnable Graph-RAG knowledge engine**
 > with explicit reasoning paths and self-evolution scaffolding.
@@ -204,6 +204,7 @@ Inspired by:
 - [LightRAG](https://github.com/HKUDS/LightRAG)
 - [Graphiti](https://github.com/getzep/graphiti)
 - Palantir-style ontology approaches
+- Architectural direction, Platform Readiness gates, and roadmap framing are discussed with **LEO** 
 
 ---
 
