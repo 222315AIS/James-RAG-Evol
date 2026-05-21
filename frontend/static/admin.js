@@ -317,46 +317,21 @@ function toggleAdminPwVisibility() {
 async function doAdminLogin() {
   const username = document.getElementById('admin-login-id')?.value.trim() || 'admin';
   const password = document.getElementById('admin-login-pw')?.value || '';
-  const errEl    = document.getElementById('admin-login-error');
+  const errEl = document.getElementById('admin-login-error');
   if (errEl) errEl.textContent = '';
 
-  if (!password) { if(errEl) errEl.textContent = t('auth.password_required'); return; }
-
-  try {
-    const r = await fetch(`${API}/login/`, {
-      method:  'POST',
-      headers: {'Content-Type': 'application/json'},
-      body:    JSON.stringify({username, password, api_key: apiKey}),
-    });
-    const d = await r.json();
-
-    if (!r.ok) {
-      if(errEl) errEl.textContent = d.detail || `Login failed (${r.status})`;
-      return;
-    }
-
-    // access_token 또는 token 필드 모두 처리
-    const tok  = d.access_token || d.token || '';
-    const role = d.role || 'external';
-
-    if (!tok)            { if(errEl) errEl.textContent = t('auth.token_failed'); return; }
-    if (role !== 'admin'){ if(errEl) errEl.textContent = `Admin role required (role: ${role})`; return; }
-
-    token = tok;
-    // [#A8-4] localStorage — chat 페이지와 공유. 다른 탭의 storage 이벤트로
-    // chat 페이지 role-badge 자동 갱신.
-    localStorage.setItem('james_token', token);
-    localStorage.setItem('james_role',  role);
-
-    const modal = document.getElementById('admin-login-modal');
-    if (modal) modal.style.display = 'none';
-    loadDashboard();
-    // [PR plan-3] 로그인 후 LLM 모델 readiness 체크. 0개면 wizard 노출.
-    setTimeout(() => { try { firstRunCheck(); } catch (_) {} }, 600);
-
-  } catch (e) {
-    if(errEl) errEl.textContent = `Server error: ${e.message}`;
+  const res = await Auth.login({ username, password, apiKey, requireRole: 'admin' });
+  if (!res.ok) {
+    if (errEl) errEl.textContent = res.error;
+    return;
   }
+  token = res.token;
+
+  const modal = document.getElementById('admin-login-modal');
+  if (modal) modal.style.display = 'none';
+  loadDashboard();
+  // [PR plan-3] 로그인 후 LLM 모델 readiness 체크. 0개면 wizard 노출.
+  setTimeout(() => { try { firstRunCheck(); } catch (_) {} }, 600);
 }
 
 /* ── [PR plan-3, 2026-05-09] First-run wizard ───────────────────
@@ -366,7 +341,7 @@ async function doAdminLogin() {
    시 안 띄움. 그러나 firstRunCheck()는 항상 호출되며 dismiss 됐어도
    ↻ 새로고침 버튼이 강제 표시 가능. */
 
-let _firstRunInstallPoll = null;
+let _firstRunInstallController = null;
 
 async function firstRunCheck() {
   // 이번 세션에서 이미 dismiss됐고 모델이 ≥1개면 wizard 안 띄움.
@@ -481,6 +456,8 @@ function _firstRunRow(r, primary) {
   </div>`;
 }
 
+// HTTP + 폴링 메커니즘은 llm-install.js의 LlmInstall.start()가 담당.
+// 여기는 firstrun 모달 UI 렌더링만.
 async function firstRunInstall(model) {
   if (!model) return;
   const progressBox = document.getElementById('firstrun-progress');
@@ -489,77 +466,42 @@ async function firstRunInstall(model) {
   if (progressBox) progressBox.style.display = 'block';
   if (progressText) progressText.textContent = `${model} 설치 시작 중...`;
 
-  try {
-    const r = await fetch(
-      `${API}/llm/install/?api_key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(model)}`,
-      {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      },
-    );
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
-    }
-    // 진행률 폴링
-    if (_firstRunInstallPoll) clearInterval(_firstRunInstallPoll);
-    _firstRunInstallPoll = setInterval(() => _firstRunPollProgress(model), 2500);
-    _firstRunPollProgress(model);   // 즉시 1회
-  } catch (e) {
-    if (progressText) progressText.textContent = `❌ 설치 실패: ${e.message}`;
-  }
-}
-
-async function _firstRunPollProgress(model) {
-  try {
-    const r = await fetch(
-      `${API}/admin/llm/install-progress?api_key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(model)}`,
-      { headers: { 'Authorization': `Bearer ${token}` } },
-    );
-    if (!r.ok) {
-      if (r.status === 401) {
-        // 세션 만료 — 폴링 중단 + localStorage 정리 (chat tab role
-        // badge도 같이 업데이트되도록 SSO 일관성 유지).
-        clearInterval(_firstRunInstallPoll);
-        _firstRunInstallPoll = null;
-        try {
-          localStorage.removeItem('james_token');
-          localStorage.removeItem('james_role');
-        } catch (_) {}
+  if (_firstRunInstallController) _firstRunInstallController.stop();
+  _firstRunInstallController = LlmInstall.start(model, {
+    onProgress(p) {
+      const txt = document.getElementById('firstrun-progress-text');
+      const bar = document.getElementById('firstrun-progress-bar');
+      if (txt) {
+        const pctStr = (p.percent != null) ? `${p.percent}%` : (p.status || '진행 중');
+        txt.textContent = `⏳ ${model}: ${pctStr}`;
       }
-      return;
-    }
-    const p = await r.json();
-    const progressText = document.getElementById('firstrun-progress-text');
-    const progressBar = document.getElementById('firstrun-progress-bar');
-    if (p.error) {
-      if (progressText) progressText.textContent = `❌ ${model} 실패: ${p.error}`;
-      clearInterval(_firstRunInstallPoll);
-      _firstRunInstallPoll = null;
-      return;
-    }
-    if (p.done) {
-      if (progressText) progressText.textContent = `✅ ${model} 설치 완료! 이제 답변할 수 있습니다.`;
-      if (progressBar) progressBar.style.width = '100%';
-      clearInterval(_firstRunInstallPoll);
-      _firstRunInstallPoll = null;
+      if (bar && p.percent != null) {
+        bar.style.width = `${p.percent}%`;
+      }
+    },
+    onDone() {
+      const txt = document.getElementById('firstrun-progress-text');
+      const bar = document.getElementById('firstrun-progress-bar');
+      if (txt) txt.textContent = `✅ ${model} 설치 완료! 이제 답변할 수 있습니다.`;
+      if (bar) bar.style.width = '100%';
       // 자동 닫기 (3초 후)
       setTimeout(() => {
         const modal = document.getElementById('firstrun-wizard-modal');
         if (modal) modal.style.display = 'none';
       }, 3000);
-      return;
-    }
-    if (progressText) {
-      const pctStr = (p.percent != null) ? `${p.percent}%` : (p.status || '진행 중');
-      progressText.textContent = `⏳ ${model}: ${pctStr}`;
-    }
-    if (progressBar && p.percent != null) {
-      progressBar.style.width = `${p.percent}%`;
-    }
-  } catch (e) {
-    console.warn('[firstrun-poll]', e);
-  }
+    },
+    onError(e) {
+      const txt = document.getElementById('firstrun-progress-text');
+      if (txt) txt.textContent = `❌ ${model} 실패: ${e.message}`;
+    },
+    onUnauthorized() {
+      // 세션 만료 — chat tab role-badge도 같이 갱신되도록 SSO 일관성 유지.
+      try {
+        localStorage.removeItem('james_token');
+        localStorage.removeItem('james_role');
+      } catch (_) {}
+    },
+  });
 }
 
 function firstRunDismiss() {
@@ -1276,33 +1218,15 @@ async function submitSignup() {
 
 async function submitPasswordReset() {
   const username = document.getElementById('reset-username').value.trim();
-  const token    = document.getElementById('reset-token').value.trim();
-  const newPw    = document.getElementById('reset-new-pw').value;
-  const errEl    = document.getElementById('reset-error');
+  const token = document.getElementById('reset-token').value.trim();
+  const newPw = document.getElementById('reset-new-pw').value;
+  const errEl = document.getElementById('reset-error');
   errEl.textContent = '';
-  if (!username || !token || !newPw) {
-    errEl.textContent = t('auth.reset_fill_all');
-    return;
-  }
-  try {
-    // Bare fetch — no Bearer header (anonymous flow), no api_key
-    // query (the endpoint is public). The api() helper assumes both.
-    const r = await fetch(`${API}/password/reset/confirm`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ username, token, new_password: newPw }),
-    });
-    if (r.ok) {
-      alert(t('auth.reset_success'));
-      closeForgotPasswordModal();
-      return;
-    }
-    let detail = `${r.status}`;
-    try { detail = (await r.json()).detail || detail; } catch (_e) {}
-    errEl.textContent = detail;
-  } catch (e) {
-    errEl.textContent = e.message;
-  }
+
+  const res = await Auth.resetPasswordConfirm({ username, token, newPassword: newPw });
+  if (!res.ok) { errEl.textContent = res.error; return; }
+  alert(t('auth.reset_success'));
+  closeForgotPasswordModal();
 }
 
 /* ── Entity (item #1: search + paging + detail modal) ── */
