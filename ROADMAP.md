@@ -312,10 +312,137 @@ domain packs will be built against.
 
 ---
 
-## v0.4.0 — First Domain Pilot (~6 months after v0.3)
+## v0.4.0 — Layer 4 Lifecycle Semantics (~6 months after v0.3)
+
+**Theme**: deepen the memory lifecycle beyond the v0.3 Layer 3
+cascade (Memory OS) into Layer 4 — two complementary tracks
+**EVENT/TEMPORAL** (semantic evolution) and **GOVERNANCE**
+(write-time control), plus a Layer 3 extension for causality.
+Seven areas (T1–T7) chosen from the 2026-05-21 user critique
+series.
+
+**Core architectural axiom — CASCADE vs EVENT separation**
+(`docs/architecture/memory-lifecycle-architecture.md §1.5`):
+
+| Class | Trigger | Handling | Example |
+|---|---|---|---|
+| **Invalidated** → CASCADE (Layer 3) | Explicit invalidation signal (doc delete, ingestion error, source revoke) | Source removal + propagation + orphan sweep | Mis-uploaded doc / withdrawn report / typo correction |
+| **Superseded** → EVENT/TEMPORAL (Layer 4-A) | New doc / time progression / policy change / state transition | Validity window close + supersede chain (past data preserved) | CEO change / policy revision / contract termination |
+
+Many naive RAG/KG systems collapse both into one mechanism
+(overwrite/append) → contradiction explosion, stale retrieval,
+hallucination increase. v0.4 enforces the separation as a
+*test-level invariant* (T7 invariants:
+`supersede_does_not_trigger_cascade` /
+`cascade_preserves_supersede_chain`).
+
+**Why v0.4 was retargeted from "Domain Pilot"**: the v0.3 cascade
+(Phase A–E + 2 hotfixes) revealed that "Layer 3 alone" doesn't
+cover real operational governance — stale facts accumulate,
+contradicting sources reject silently (Gate 5), manual entries
+have no reviewer hierarchy, and event sourcing for arbitrary-time
+graph replay is absent. The Domain Pilot moves to v0.5 (it
+requires Layer 4 governance to be production-credible anyway).
+
+**Required for**: any v0.5 domain pilot (forbidden until Layer 4
+T1+T7+T2 minimum lands and the CASCADE/EVENT separation invariant
+is provable).
+
+### Scope — 7 areas across 3 tracks (T1–T7)
+
+| Stage | Area | Track | Goal |
+|---|---|---|---|
+| **T1** | Temporal Validity & Expiration | **EVENT** | Fact valid window definition + auto-expiration (mark, not delete) |
+| **T2** | Deterministic Contradiction Arbitration | **GOVERNANCE → routing** | LLM-free deterministic resolution + A/B classification (CASCADE vs EVENT) |
+| **T3** | Evidence Aging & Trust Decay | **EVENT** | Per-source weight decay by domain function |
+| **T4** | Reviewer Authority Hierarchy | **GOVERNANCE** | Multi-level manual source governance (analyst / manager / admin) |
+| **T5** | Replayable Audit Graph | **EVENT** | Event-sourced reconstruction, arbitrary-time graph replay |
+| **T6** | Causality Chain Tracking | **CASCADE extension** | Derived fact base-fact tracking + auto-invalidation propagation |
+| **T7** ⭐ | Supersede Chain | **EVENT** | Edge-level `status: {active, superseded_by}`. World change → past preserved + new edge created + chain walk |
+
+Full design: `docs/design/v0.4-lifecycle-semantics-roadmap.md`.
+Reference architecture: `docs/architecture/memory-lifecycle-architecture.md`.
+
+### Phase plan
+
+- **v0.4.0** (2026 Q4 ~ 2027 Q1): **T1 + T7 + T2** (EVENT core +
+  routing). T1 (validity window) and T7 (supersede chain) ship
+  together — separation is meaningless without both. T2's A/B
+  routing enforces the separation at write time (misclassification
+  becomes immediately testable).
+- **v0.4.1** (2027 Q1 ~ Q2): T6 — Causality Chain (CASCADE extension)
+- **v0.4.2** (2027 Q2): T3 — Evidence Aging (EVENT)
+- **v0.4.3** / **v0.5 prep** (2027 Q3 ~ Q4): T4 + T5 — Reviewer
+  Authority + Replayable Audit
+
+### Invariants (extending v0.3's 12 invariants)
+
+- **Existing 12** locked in `tests/test_relations_schema.py` +
+  `tests/test_phase_b_ingestion_sources.py` (Layer 3 cascade).
+- **New T1–T7 invariants**: ~27 (cumulative 39). Per-stage
+  contract test files following the 2026-05-22 i18n sweep
+  pattern (`tests/test_*_i18n.py` × 5 already pin label_key
+  conventions — same `_contract`-style files for T1–T7).
+- **Critical separation invariants** (T7):
+  - `test_supersede_does_not_trigger_cascade` — EVENT mutation
+    must not call Layer 3 `cascade_remove`
+  - `test_cascade_preserves_supersede_chain` — CASCADE invalidation
+    must not break `status.superseded_by` links (active history preserved)
+  - `test_historical_replay_via_chain` — `reconstruct_view_at(t)`
+    accurately reconstructs the graph state at any past time
+
+### Cross-cutting contracts (preserved from v0.3)
+
+- **i18n `label_key`** — every UI-exposed label from new Layer 4
+  modules (reviewer_rank, approval_state, contradiction reason,
+  aging policy names) must follow the backend label_key contract
+  established by the 2026-05-22 sweep across 7 modules. Convention
+  test in the corresponding `test_*_i18n.py` blocks silent
+  regression.
+- **Bench gate (CLAUDE.md rule 2)** — T1 expiration cascade,
+  T6 invalidation cascade, and any other change touching
+  `core/retrieval` / `core/graph` / `core/reasoning` must paste
+  STEP 7 bench numbers in PR body.
+- **Module size gate (CLAUDE.md rule 5)** — new
+  `core/lifecycle/*.py` files each < 20 KB. Split first if a
+  change would push over.
+
+### Done when
+
+- T1 + T7 + T2 (minimum) shipped, with new invariants green and
+  STEP 7 baseline no-regression.
+- **Separation invariant provable**: write a B-class fact (e.g.,
+  `(Joby, CEO, Bob)` arriving after existing `(Joby, CEO, Alice)`)
+  → T2 routes to EVENT supersede chain → old Alice edge survives
+  with `status.superseded_by` link → CASCADE log shows zero
+  `cascade_remove` calls for this mutation.
+- Operator scenario A (CASCADE): a withdrawn report uploaded
+  earlier is deleted via admin UI; its sourced facts cleanly
+  vanish or recompute confidence — supersede chains for unrelated
+  edges remain intact.
+- Operator scenario B (EVENT): a 분기 보고서 uploaded with
+  `valid_until` expires automatically; its edge is *marked*
+  `status.active = false` not deleted, and historical replay at
+  the prior date still returns it.
+- Reference architecture memo + 7-area design memo published
+  (`docs/architecture/memory-lifecycle-architecture.md` +
+  `docs/design/v0.4-lifecycle-semantics-roadmap.md`).
+
+### Out of scope (deferred to v0.5)
+
+- Any domain pack (legal / food / retail) — moved to v0.5
+- External customer onboarding playbook
+- Public eval results in `eval/RESULTS.md`
+- 6-month production track record
+
+---
+
+## v0.5.0 — First Domain Pilot (~6 months after v0.4)
 
 **Theme**: prove the platform contract by running ONE real domain
-in production for 6 months with one external customer.
+in production for 6 months with one external customer. **Moved here
+from v0.4** so Layer 4 governance lands first — see v0.4 retarget
+rationale above.
 
 **Required for**: a second domain pack (forbidden until this gate passes).
 
@@ -345,7 +472,7 @@ in production for 6 months with one external customer.
 
 ---
 
-## v1.0.0 — Production-Grade Mother (~6 months after v0.4)
+## v1.0.0 — Production-Grade Mother (~6 months after v0.5)
 
 **Theme**: make domain branching safe for outsiders. After this gate,
 external developers can publish their own packs.
@@ -432,11 +559,27 @@ We follow [Semantic Versioning](https://semver.org/):
 
 ---
 
-**Last updated**: 2026-05-13 — **v0.3 진입 정식**. Axis 6 두 번째
+**Last updated**: 2026-05-22 — **v0.4 retarget to Layer 4
+Lifecycle Semantics + CASCADE/EVENT 분리 axiom 채택**. v0.3 cycle
+의 Knowledge Cascade (Layer 3 Memory OS) 가 안정화되며, 2026-05-21
+사용자 비판 시리즈에서 "Layer 3 alone" 의 governance gap (stale facts
+/ Gate 5 silent reject / manual hierarchy 없음 / event sourcing 부재)
+드러남. 후속 architectural insight 로 **CASCADE (invalidation
+propagation) 와 EVENT/TEMPORAL (semantic evolution) 의 명확 분리**
+axiom 채택 — 두 종류 mutation 을 같은 메커니즘으로 처리하면
+contradiction 폭발. 7 영역 (T1–T7, T7 supersede chain 신규) 디자인
+메모 (`docs/architecture/memory-lifecycle-architecture.md` §1.5 +
+`docs/design/v0.4-lifecycle-semantics-roadmap.md` §9.5) 작성. v0.4
+첫 ship bundle = T1+T7+T2 (EVENT 핵심 + A/B routing). 기존 v0.4
+(First Domain Pilot) → v0.5 로 shift. 2026-05-22 i18n sweep 시리즈
+(7 PR, ~304 entries, 7 backend 모듈) 가 `label_key` 패턴을 platform
+invariant 로 lock-in — v0.4 신규 라벨도 동일 contract 필수. Open
+issues: 0.
+
+**Prior update (2026-05-13)**: **v0.3 진입 정식**. Axis 6 두 번째
 사용자 게이트도 모집 완료 → 6 axes 모두 통과 → v0.2 → v0.3 gate clear.
 v0.2.x 가 더한 Change Request 기반 (`core/change_request.py` +
 `wiki_entity` + `run_jobs`) + dependabot 6 high-severity 마감 +
 정공법 3 PR (#252/253/254: 웹 학습 LLM-triple 위임 / UNRESOLVED sweep /
 노이즈 cleanup 스크립트). v0.3 Platform Skeleton 트랙 활성 — License /
 CLA / Plugin API / Knowledge Cascade / CR-E 가 본 사이클부터 deliverable.
-Open issues: 0.
