@@ -1,0 +1,240 @@
+# v0.3.x — Evidence-Scope Routing Track (LEO proposal)
+
+> Status: **proposed** — 2026-05-25 entry. Originated by **LEO**.
+> Not yet scoped into a PR cycle — this is a design memo for review.
+> Created: 2026-05-25
+> Origin: **Jiwon** 이 Gemma 4 응답-중단 문제 + 7-tier 분류 신뢰성에 의문 제기
+> → **Leo (Younghu)** 가 routing 아이디어 제안 → 본 문서로 구체화 (상세: §문서 작성 경위)
+> Companion documents:
+>   - `docs/handovers/v0.3.x-direction5-auto-routing-track.md` — D5 routes on *predicted* task weight; this track adds a *measured* signal
+>   - `docs/handovers/v0.3.x-measurement-framework-track.md` — 3-axis cost framework + Direction 2 (task-weight metric)
+>   - `docs/handovers/v0.3.x-gemma4-feedback-track.md` — Gemma 4 응답-중단(generation halt) 관측 pile (발단)
+>   - `core/reasoning/budget.py` — D1 TaskBudget (output-token prediction; the thing this track contrasts with)
+>   - `core/reasoning/engine.py` — reasoning loop where the routing decision is inserted
+>   - `core/retrieval_engine.py` / `core/graph_engine.py` / `core/orchestrator.py` — where the evidence-scope signal is read from
+
+## 문서 작성 경위 (Origin)
+
+이 문서는 **Jiwon ↔ Leo (Younghu)** 사이의 논의에서 출발했다.
+
+**발단 (Jiwon → Leo).**
+- 로컬 LLM **Gemma 4 (gemma4:e4b)** 가 추론 도중 **답변이 멈추는 문제**
+  (generation halt — `done_reason=length` 류의 조기 종료)가 관측됐다.
+- 이를 계기로 "사고 과정(cognitive stage)별 LLM **토큰 사용량**"을 근거로
+  backend 를 고르는 **라우팅 설계**가 시작됐다 (D1 adaptive budget →
+  D5 auto-routing 라인).
+- 현재 설계는 작업을 **7가지 속성(7-tier)** 으로 나눠 토큰 사용량을
+  예측·할당한다 (D1 의 7-tier natural-stop gradient, 62→1681 tokens).
+
+**쟁점 제기 (Jiwon).**
+- Jiwon 이 *"그 7-tier 구분으로 실제로 잘 작동할지"* 에 의문을 던지며
+  논의를 열었다. 즉 — **프롬프트 표면에서 출력 토큰량을 예측하는
+  출력측(output-side) 분류**가 라우팅 기준으로 신뢰할 만한가? 응답이
+  멈추는(halt) 케이스부터가 "예측이 빗나가는" 증거 아닌가.
+
+**Leo 의 제안 → 본 문서.**
+- 이에 대해 **Leo (Younghu)** 가 아이디어를 제안했다: 토큰량을 *예측*하지
+  말고, **답을 찾는 데 동원된 데이터 양(증거 범위, evidence scope)을
+  측정**해서 라우팅하자 — 입력/검색측(input-side) 관측으로 축을 바꾸는 것.
+- 본 문서는 그 Leo 의 제안을 **설계 메모로 정식화·구체화**한 결과물이다.
+  (즉 7-tier 출력측 예측을 *버리는* 게 아니라, 그 신뢰성 공백을 메우는
+  측정 기반 보강 축으로 자리매김 — 아래 §Relationship to D5 참조.)
+
+## TL;DR (the LEO idea in one line)
+
+라우팅 기준을 **"답을 쓰는 데 드는 토큰량 예측"(출력측)** 에서
+**"답을 찾는 데 동원된 데이터 양"(증거 범위, evidence scope — 입력/검색측)** 으로
+바꾸자. 데이터 양은 *예측*이 아니라 *측정*이 가능하고, JAMES는 local-first라
+검색 1패스가 LLM 추론에 비해 사실상 공짜이므로 **"먼저 가볍게 검색 → 실제
+증거 범위 측정 → 그 결과로 엔진 선택"** 이 구조적으로 더 정확하고 싸다.
+
+> **Substitution is free. Synthesis costs in proportion to what it has to
+> invent** — 이 measurement-framework headline의 따름정리(corollary):
+> *답을 찾는 데 더 많은 데이터를 뒤져야 했다면, 그 답을 합성하는 일도 더
+> 무겁다.* Evidence scope = 합성 난이도의 선행 관측치.
+
+## Purpose
+
+D5 (Auto-routing) 는 `(budget_tier, task_type)` 휴리스틱으로 backend 를
+고른다 — 둘 다 **프롬프트 표면에서 검색 이전에** 추정하는 신호다
+(`budget.py` 의 substitution/light/heavy 3-tier + stage 이름 hint).
+
+LEO 제안은 여기에 **세 번째 축**을 더한다: `evidence_scope` — 검색·그래프
+확장이 *실제로* 끌어온 데이터 양/분포. 이건 추정이 아니라 retrieval /
+graph 엔진이 이미 내놓는 출력에서 **세어볼 수 있는 관측값**이다.
+
+핵심 주장:
+
+- 출력 토큰량 예측(현재 D1/D5)은 답을 쓰기 *전*의 추측이라 자주 빗나간다.
+  (Gemma 4 응답-중단 = 그 추측이 빗나가 cap 에 걸린 대표 증상.)
+- "책을 몇 권 뒤졌나"(증거 범위)는 검색 직후 **정확히 측정**된다.
+- local-first 환경에서 검색(vector+BM25, graph DFS)은 LLM 호출 대비
+  거의 공짜 → "측정 후 라우팅"의 선지불 비용이 무시할 수준.
+
+> 초등학생 버전: 책 한 권만 펼치면 답이 나오는 질문은 *빠른 로봇*에게,
+> 책 열 권을 뒤져 여기저기서 모아야 하는 질문은 *똑똑한 로봇*에게. 답을
+> 쓰기 전에 "몇 권 뒤졌나"를 세어보고 로봇을 고른다.
+
+## Relationship to D5 (not a fork)
+
+| | D5 Auto-routing (existing) | Evidence-Scope (this proposal) |
+|---|---|---|
+| Signal source | prompt surface, **pre-retrieval** | retrieval/graph output, **post-retrieval** |
+| Nature | predicted (guess) | measured (counted) |
+| Axis | `budget_tier`, `task_type` | `evidence_scope` (new) |
+| Cost to compute | ~free (string ops) | one local retrieval pass (~free, local-first) |
+| Where it lives | `core/reasoning/router.py` (D5.A) | extends same router; new extractor module |
+
+**이 트랙은 D5 위에 얹는다, 대체하지 않는다.** `router.py` 가 D5.A 에서
+생기면 그 `select_backend(...)` 시그니처에 `evidence_scope` 인자를 추가하는
+형태. D5 가 아직 안 landed 면 이 트랙은 D5.C 이후로 순서가 밀린다 (의존).
+
+Jiwon 이 제기한 "7-tier 출력측 예측이 믿을 만한가" 라는 의문에 대한 답이
+바로 이 보강 축이다 — 예측이 흔들리는 구간을 **측정값으로 교정**한다.
+
+## Why now / why this is cheap to try
+
+| Reason | Note |
+|---|---|
+| 측정 인프라 이미 존재 | `retrieval_engine.hybrid_search()` 는 top_k 문서 + 점수를, `graph_engine.expand_dynamic()` 는 DFS 깊이/fan-out 을 이미 반환. 새 신호는 그 출력을 *읽기*만 하면 됨 — 새 LLM 호출 0개. |
+| local-first 비용 구조 | 검색은 로컬, 추론이 비싼 부분. "측정 후 라우팅"의 선지불(검색 1패스)이 거의 0. |
+| Gemma 4 halt 문제 직결 | 응답-중단은 출력측 cap 예측 실패의 증상. 증거 범위로 무거운 질의를 미리 식별하면 더 큰 backend/cap 으로 보내 halt 자체를 줄임. |
+| D5 와 같은 audit sink | routing 결정은 `audit_log` 의 `reason:route` row 로 이미 흘러감(D5.C). evidence_scope 를 payload 에 한 필드 더 넣으면 v0.4 EVENT/GOVERNANCE 가 그대로 집어감. |
+| Direction 2 (task-weight metric) 보완 | measurement-framework 의 Direction 2 가 "prompt → weight" 회귀를 찾는 중. evidence_scope 는 그 회귀의 **정답 레이블에 가까운 사후 관측치** — Direction 2 fitting 의 target/feature 로 재활용 가능. |
+
+## What "evidence scope" is made of
+
+`core/retrieval_engine.py` / `core/graph_engine.py` / `core/orchestrator.py`
+가 이미 내놓는 값에서 합성한다 (새 모델 호출 없음):
+
+1. **Effective top_k** — relevance threshold 를 넘긴 문서 수 (기본 top_k=8,
+   orchestrator 는 original+expanded+keyword 3쿼리). 임계 초과 문서가 1~2개면
+   좁은 답, 8개 가까우면 넓은 답.
+2. **Score distribution shape** — 점수 분포의 날카로움(엔트로피/지니). 단일
+   피크 = 한 청크에 답이 있음(좁음); 평평 = 증거가 흩어짐(넓음).
+3. **Graph fan-out & depth** — DFS 가 도달한 깊이(MAX_DEPTH=4)와 확장한
+   엔티티/엣지 수. 깊고 넓게 퍼졌으면 multi-hop 추론 부담 큼.
+4. **Cross-document spread** — 답 근거가 1개 문서에 모였나 vs 여러 문서에
+   분산됐나 (분산 = 합성 난이도 ↑).
+
+→ 위 4개를 단조(monotonic) 결합해 단일 `evidence_scope ∈ [0,1]` 스칼라로.
+v1 은 가중합 휴리스틱, 가중치는 STEP 7 prompt 들로 보정.
+
+## Where the routing decision goes
+
+`core/reasoning/engine.py` 의 추론 루프 (`_query_impl`, MAX_LOOP=2):
+
+```
+STEP 0    security pre-check
+STEP 0.5a query router (intent)            ← D5 의 1차 라우팅 (pre-retrieval)
+Loop 0    retrieval (orchestrator.retrieve)
+Loop 1    graph expand (expand_dynamic)
+          ── evidence_scope 측정 지점 ──     ← LEO: 여기서 scope 계산
+          ── synth backend 재선택 ──         ← LEO: scope 로 Loop 2 엔진 선택
+Loop 2    verify paths + generate answer    ← 선택된 backend 로 합성
+post      security output filter
+cleanup   release working memory
+```
+
+즉 **intent 단계의 1차(저렴) 라우팅은 유지**하되, 합성 직전 Loop 2 의
+**무거운 backend 선택은 측정된 evidence_scope 로 확정**한다. 검색은 어차피
+어떤 backend 로 가든 동일하므로 라우팅을 합성 직전으로 늦춰도 손해 없음.
+
+## Scope
+
+### In
+- `core/reasoning/evidence_scope.py` (신규) — `compute_scope(retrieval_result, graph_result) → float` 순수 함수, LLM 호출 0개
+- D5 `router.select_backend(...)` 에 `evidence_scope` 인자 추가 (D5 의존)
+- `engine.py` Loop 1→2 사이에 측정 + 합성 backend 재선택 훅
+- Flag: `JAMES_SCOPE_ROUTING` — default **OFF** (opt-in, behavior-preserving; D1/D5 flag 패턴 동일)
+- Audit: `reason:route` payload 에 `evidence_scope` + 구성요소(effective_k, score_entropy, graph_depth, doc_spread) 추가
+- Test: scope 추출기 contract pin + flag-off byte-identical invariance
+- STEP 7 bench in PR body (CLAUDE.md rule #2)
+
+### Out (deferred)
+- Cost-based scoring (token price × latency) — 여전히 D5 와 동일하게 v2
+- Pre-retrieval scope *prediction* (검색 없이 prompt 에서 scope 추정) — 측정 우선, 예측은 Direction 2 가 별도로
+- Re-retrieval / escalate-and-refetch loop — scope 가 크면 더 많이 검색하는 적응형 검색은 별도 트랙
+- Multi-objective routing
+
+## Phase plan (mirrors D5 lettering)
+
+### L.0 — Design memo (this doc, docs only)
+- 이 문서. 코드 변경 없음. bench N/A (rule #2 docs-only 예외).
+
+### L.A — Scope extractor + flag (small, code + test)
+- `core/reasoning/evidence_scope.py` 신규, 순수 함수.
+- `JAMES_SCOPE_ROUTING` flag (default OFF). OFF 시 D5/legacy 경로 byte-identical.
+- `tests/test_evidence_scope.py` — 4 구성요소 계산 pin + flag-off invariance.
+- STEP 7 bench: regression sanity (flag OFF 기본).
+
+### L.B — Router 축 확장 (D5 의존)
+- D5 `router.select_backend` 에 `evidence_scope` 축 추가. 정책 v1:
+  좁은 scope → small backend, 넓은 scope → large/cloud backend.
+- 1 unit test: scope→backend 결정 pin.
+
+### L.C — Engine loop 배선 + audit
+- `engine.py` Loop 1→2 사이 측정 + 합성 backend 재선택.
+- `reason:route` audit row 에 scope payload.
+- STEP 7 bench in PR body — flag-OFF baseline vs flag-ON.
+
+### L.D — Closure
+- `reports/promo-assets/v3prime-leo-evidence-scope-result.md` — bench delta + scope→backend 정책표.
+- ROADMAP entry, memory sync.
+
+## STEP 7 bench plan
+
+| Arm | Expected (flag ON vs OFF) |
+|---|---|
+| 좁은 scope (verbatim/single-doc) | latency ↓ — small backend 로 라우팅 |
+| 넓은 scope (multi-doc, graph fan-out 큼) | latency ↑ 허용 — 단 grounded=true rate ↑ 또는 동률 |
+| 중간 | ≈ baseline |
+| halt-prone (이전 Gemma 4 중단 케이스) | done_reason=length 발생률 ↓ (큰 backend/cap 라우팅) |
+
+Acceptance: **flag OFF = pre-change main 과 byte-identical**, flag ON 에서
+grounded=true rate 가 어느 arm 에서도 D1 v2 closure 수준(stage별 20/20) 밑으로
+떨어지지 않을 것.
+
+## CLAUDE.md rules applied
+
+- **rule #1** (no domain features): N/A — generic infra.
+- **rule #2** (bench on `core/{retrieval,graph,reasoning}`): ✅ L.A~C PR body 에 STEP 7. L.0 docs-only.
+- **rule #3** (self-evolution opt-in): N/A — 자기진화 표면 안 건드림.
+- **rule #4** (architecture change): `engine.py` 루프에 라우팅 분기 추가 + 신규 모듈 → `architecture` 라벨 PR + `docs/ARCHITECTURE.md` 동시 수정.
+- **rule #5** (module ≤ 20 KB): `evidence_scope.py` 목표 ~6 KB. 초과 시 분리.
+
+## Done when
+
+| Criterion | How verified |
+|---|---|
+| Flag-OFF = pre-change main | `test_evidence_scope.py::test_flag_off_identical` + STEP 7 delta ≤ ±5% |
+| 좁은 scope → small / 넓은 scope → large 라우팅 | router decision test + STEP 7 좁은-arm latency ↓ |
+| scope payload audit row | `SELECT ... WHERE endpoint='reason:route'` 에 evidence_scope 필드 존재 |
+| grounded rate 무회귀 | 모든 arm 에서 verify pass ≥ D1 v2 수준 |
+| halt 감소 | halt-prone arm 에서 done_reason=length 발생률 ↓ |
+| Closure doc + ROADMAP + memory | result doc 존재, ROADMAP entry 체크 |
+
+## Open questions (for review)
+
+1. evidence_scope 결합 가중치를 휴리스틱으로 고정할지, Direction 2 회귀가 학습한 값을 쓸지 (후자는 Direction 2 land 의존).
+2. 합성 직전 backend 재선택이 intent-단계 1차 라우팅과 충돌하는 케이스 정책 (둘 다 클라이언트 override 가능 — 우선순위 명문화 필요).
+3. scope 측정을 위해 검색을 항상 먼저 돌리면, `chat`/`self_evolve` 처럼 검색이 불필요한 mode 에서는 skip 해야 함 (mode gate 필요).
+4. (Jiwon 원쟁점) 7-tier 출력측 예측과 evidence_scope 측정값이 어긋날 때 — 어느 쪽을 신뢰? v1 은 "측정값이 예측을 한 단계까지 승급/강등 가능" 으로 제안, 데이터로 검증.
+
+## 한국어 요약
+
+**경위**: Jiwon 이 Gemma 4 로컬 LLM 의 응답-중단 문제를 Leo(Younghu)에게
+공유하고, 사고과정별 토큰 사용량 기반 라우팅을 7-tier 로 나눈 현재 설계가
+"정말 잘 작동할지" 의문을 제기하며 논의를 열었다. 이에 Leo 가 아이디어를
+제안했고 본 문서가 그 제안을 구체화했다.
+
+**제안**: 엔진 라우팅 기준을 **"답 쓰는 데 드는 토큰 예측"(출력측, 추측)**
+에서 **"답 찾는 데 동원된 데이터 양"(증거 범위, 입력측, 측정)** 으로 옮기자.
+검색·그래프 엔진이 이미 내놓는 값(임계 초과 문서 수, 점수 분포, 그래프
+fan-out/깊이, 문서 분산)으로 `evidence_scope` 스칼라를 만들고, 추론 루프의
+합성 직전(Loop 1→2)에 이 값으로 합성 backend 를 고른다. local-first 라 검색은
+거의 공짜 → "측정 후 라우팅"이 구조적으로 정확하고 쌈. 기존 D5 Auto-routing
+의 **대체가 아니라 세 번째 축 보강**(Jiwon 이 의심한 7-tier 예측의 공백을
+측정으로 교정)이며, Direction 2 task-weight metric 의 정답 레이블로도 재활용
+가능. opt-in flag(`JAMES_SCOPE_ROUTING`, default OFF), core/reasoning 변경이라
+STEP 7 bench + 회귀 테스트 필수, architecture 라벨 대상.
